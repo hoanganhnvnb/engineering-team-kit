@@ -4,3 +4,4 @@ __pycache__/
 .DS_Store
 node_modules/
 tests/e2e/results/
+evals/results/
