@@ -60,6 +60,8 @@ def main() -> int:
     ap.add_argument("--timeout", type=int, default=1800)
     ap.add_argument("--model", default=None)
     ap.add_argument("--keep", action="store_true", help="keep the temp project dir")
+    ap.add_argument("--overlay", default=None,
+                    help="dir under tests/fixtures/overlays copied over the project after the baseline commit")
     ap.add_argument("--bypass", action="store_true",
                     help="run with --permission-mode bypassPermissions. The agent can then run ANY command "
                          "as you, not only inside the temp dir. Use only in a disposable VM/container.")
@@ -77,6 +79,8 @@ def main() -> int:
     sh(["git", "add", "-A"], work)
     sh(["git", "-c", "user.email=e2e@example.com", "-c", "user.name=e2e", "commit", "-q", "-m", "fixture baseline"], work)
 
+    if a.overlay:
+        shutil.copytree(FIXTURES / "overlays" / a.overlay, work, dirs_exist_ok=True)
     cmd = ["claude", "-p", a.prompt, "--plugin-dir", str(REPO), "--output-format", "stream-json", "--verbose"]
     if a.bypass:
         print("warning: --bypass gives the agent unrestricted shell access as your user", file=sys.stderr)
