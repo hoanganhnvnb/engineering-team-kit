@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "engineering-team",
+  "displayName": "Engineering Team Kit",
+  "version": "0.1.0",
+  "description": "A small AI engineering team for Claude Code: a Lead that sizes the work, plus developer, reviewer, QA and UX agents, an evidence-based review loop, and quality gates that refuse to pass what didn't run. Respects each project's own rules and skills.",
+  "author": {
+    "name": "Hoang Anh",
+    "url": "https://github.com/hoanganhnvnb"
+  },
+  "homepage": "https://github.com/hoanganhnvnb/engineering-team-kit",
+  "repository": "https://github.com/hoanganhnvnb/engineering-team-kit",
+  "license": "MIT",
+  "keywords": ["engineering", "code-review", "qa", "ux", "workflow", "agents", "quality-gates", "solo", "small-team"]
+}

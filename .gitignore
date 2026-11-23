@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.etk/
+.DS_Store
+node_modules/
+tests/e2e/results/

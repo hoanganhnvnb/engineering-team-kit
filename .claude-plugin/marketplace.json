@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "engineering-team-kit",
+  "description": "Engineering Team Kit: a small AI engineering team for Claude Code.",
+  "owner": {
+    "name": "Hoang Anh",
+    "url": "https://github.com/hoanganhnvnb"
+  },
+  "plugins": [
+    {
+      "name": "engineering-team",
+      "description": "Lead + developer, reviewer, QA and UX agents with an evidence-based review loop and quality gates.",
+      "version": "0.1.0",
+      "source": "./",
+      "category": "development"
+    }
+  ]
+}
