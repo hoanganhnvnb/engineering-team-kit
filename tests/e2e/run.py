@@ -30,14 +30,20 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURES = REPO / "tests" / "fixtures"
+ETK_SCRIPT = REPO / "scripts" / "etk_run.py"
 ALLOWED_TOOLS = [
+    # Narrow, fixed prefixes only: no bare interpreters, no find -exec, no arbitrary npm scripts.
+    # This limits accidents. It is NOT an isolation boundary: a test file the agent writes
+    # still runs under `npm test`. Use a container/VM for anything you don't trust.
     "Read", "Edit", "Write", "Glob", "Grep", "Agent", "Skill",
-    "Bash(npm test:*)", "Bash(npm run:*)", "Bash(node --test:*)", "Bash(node:*)",
-    "Bash(python3:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+    "Bash(npm test)", "Bash(npm test:*)", "Bash(node --test:*)",
+    "Bash(python3 -m unittest:*)",
+    f"Bash(python3 {ETK_SCRIPT}:*)", f'Bash(python3 "{ETK_SCRIPT}":*)',
+    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
     "Bash(git add:*)", "Bash(git commit:*)", "Bash(git worktree:*)", "Bash(git apply:*)",
     "Bash(git rev-parse:*)", "Bash(git ls-files:*)", "Bash(git branch:*)", "Bash(git merge-base:*)",
-    "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(find:*)",
-    "Bash(mkdir:*)", "Bash(curl -s http://localhost:*)", "Bash(shopify theme check:*)",
+    "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)",
+    "Bash(curl -s http://localhost:*)", "Bash(shopify theme check:*)",
 ]
 
 
