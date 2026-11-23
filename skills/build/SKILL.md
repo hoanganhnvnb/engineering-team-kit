@@ -3,6 +3,7 @@ name: build
 description: End-to-end feature delivery with a small AI team. The main session acts as Lead, sizes the task, delegates to developer/reviewer/QA/UX agents only when it pays off, loops on findings, and reports gate results with evidence.
 argument-hint: <feature request>
 disable-model-invocation: true
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py":*)
 ---
 
 # /engineering-team:build
@@ -19,7 +20,7 @@ file only when you reach the step that needs it.
 
 ## Project snapshot
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py" 2>&1 || echo "(snapshot unavailable; discover manually)"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"`
 
 ## 1. Understand (always)
 

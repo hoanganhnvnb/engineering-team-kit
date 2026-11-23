@@ -3,6 +3,7 @@ name: fix
 description: Fix a bug with the small AI team. Reproduce it with a failing test first, find the root cause, fix minimally, review independently when the fix is non-trivial, and prove there's no regression.
 argument-hint: <bug description, error, or issue link>
 disable-model-invocation: true
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py":*)
 ---
 
 # /engineering-team:fix
@@ -17,7 +18,7 @@ how to trigger it) and stop.
 
 ## Project snapshot
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py" 2>&1 || echo "(snapshot unavailable; discover manually)"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"`
 
 ## Steps
 

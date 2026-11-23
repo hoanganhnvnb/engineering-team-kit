@@ -3,6 +3,7 @@ name: improve-ui
 description: Improve a screen or flow with the small AI team. Capture the current state as evidence, agree on concrete UX changes, implement them within the project's design system, and re-verify visually at desktop and mobile widths, including accessibility.
 argument-hint: <screen, route, or component> [what feels wrong]
 disable-model-invocation: true
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py":*)
 ---
 
 # /engineering-team:improve-ui
@@ -14,7 +15,7 @@ evidence before and after.
 
 ## Project snapshot
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py" 2>&1 || echo "(snapshot unavailable; discover manually)"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"`
 
 ## Steps
 

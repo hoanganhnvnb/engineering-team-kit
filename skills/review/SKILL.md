@@ -3,6 +3,7 @@ name: review
 description: Independent review of current changes, a branch, a commit range, or a path, using a fresh read-only reviewer (plus QA/UX when relevant). Produces verified findings with severity and evidence. Does not edit code unless asked to fix.
 argument-hint: "[base-ref | branch | path | PR number] [--fix]"
 disable-model-invocation: true
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py":*)
 ---
 
 # /engineering-team:review
@@ -14,7 +15,7 @@ their findings are real before they reach the user.
 
 ## Project snapshot
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py" 2>&1 || echo "(snapshot unavailable; discover manually)"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"`
 
 ## Steps
 

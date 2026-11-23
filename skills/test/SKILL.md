@@ -3,6 +3,7 @@ name: test
 description: QA pass on current changes, a feature, or the whole project. Derives test cases from requirements, runs the real test suites, probes edge cases, separates pre-existing failures from regressions, and reports coverage gaps with evidence.
 argument-hint: "[feature, area, or 'regression']"
 disable-model-invocation: true
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py":*)
 ---
 
 # /engineering-team:test
@@ -13,7 +14,7 @@ You are the **Lead** running a QA pass. Nothing counts unless it actually ran.
 
 ## Project snapshot
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py" 2>&1 || echo "(snapshot unavailable; discover manually)"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"`
 
 ## Steps
 
