@@ -23,12 +23,18 @@ SKIP_DIRS = {
 }
 
 
-def run(cmd: list[str], cwd: Path) -> str:
+def run(cmd: list[str], cwd: Path, timeout: int = 10) -> str:
+    out = run_checked(cmd, cwd, timeout)
+    return out or ""
+
+
+def run_checked(cmd: list[str], cwd: Path, timeout: int = 10) -> str | None:
+    """stdout on success, None if the command failed or timed out (unknown != empty)."""
     try:
-        out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10)
-        return out.stdout.strip() if out.returncode == 0 else ""
+        out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        return out.stdout.strip() if out.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired):
-        return ""
+        return None
 
 
 def find_root(start: Path) -> Path:
@@ -101,8 +107,14 @@ def main() -> int:
     # Git state -- the Lead must know about uncommitted work before touching anything.
     branch = run(["git", "branch", "--show-current"], root)
     if branch or run(["git", "rev-parse", "--git-dir"], root):
-        status = run(["git", "status", "--porcelain"], root).splitlines()
-        print(f"- git: branch `{branch or '(detached)'}`, {len(status)} uncommitted path(s)")
+        raw = run_checked(["git", "status", "--porcelain"], root, timeout=30)
+        if raw is None:
+            print(f"- git: branch `{branch or '(detached)'}`, uncommitted changes UNKNOWN (git status failed or "
+                  "timed out). Run `git status` yourself before touching files")
+            status = []
+        else:
+            status = raw.splitlines()
+            print(f"- git: branch `{branch or '(detached)'}`, {len(status)} uncommitted path(s)")
         last = run(["git", "log", "-1", "--format=%h %s"], root)
         if last:
             print(f"- last commit: {short(last, 90)}")

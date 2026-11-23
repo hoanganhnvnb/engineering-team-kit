@@ -49,6 +49,9 @@ REQUIRED_BY_KIND = {
     "test": {"G3", "G4"},
 }
 NEEDS_AC = {"build", "fix", "improve-ui"}
+AC_MET = {"met", "pass"}
+# The only honest reasons a code-changing run has no automated tests for the change.
+G3_NA_REASONS = {"docs_only", "no_test_setup"}
 FINDING_FIELDS = ["id", "severity", "location", "evidence", "expected", "actual", "remediation", "status"]
 MIN_EVIDENCE = 12
 
@@ -69,10 +72,15 @@ def runs_dir() -> Path:
 
 def exclude_from_git(root: Path) -> None:
     """Keep run files out of `git status` without touching the tracked .gitignore."""
-    git_dir = root / ".git"
-    if not git_dir.is_dir():  # worktree or no git: skip quietly
+    try:
+        out = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=root,
+                             capture_output=True, text=True, timeout=5)
+    except OSError:
         return
-    excl = git_dir / "info" / "exclude"
+    if out.returncode != 0:  # not a git repo
+        return
+    common = Path(out.stdout.strip())
+    excl = (common if common.is_absolute() else root / common) / "info" / "exclude"
     try:
         excl.parent.mkdir(parents=True, exist_ok=True)
         text = excl.read_text() if excl.exists() else ""
@@ -87,8 +95,18 @@ def slug(s: str) -> str:
     return s[:40] or "task"
 
 
+def project_config(root: Path) -> dict:
+    try:
+        cfg = json.loads((root / ".claude" / "engineering-team.json").read_text())
+        return cfg if isinstance(cfg, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def cmd_init(a) -> int:
     root = git_root()
+    if a.max_cycles is None:
+        a.max_cycles = project_config(root).get("max_cycles", 3)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     run = runs_dir() / f"{stamp}-{slug(a.task)}"
     run.mkdir(parents=True, exist_ok=False)
@@ -139,8 +157,20 @@ def validate(ledger: dict) -> tuple[list[str], list[str]]:
     if kind not in REQUIRED_BY_KIND:
         errors.append(f"kind must be one of {sorted(REQUIRED_BY_KIND)}, got {kind!r}")
     required = REQUIRED_BY_KIND.get(kind, set(GATES))
-    if not ledger.get("acceptance_criteria"):
+    acs = ledger.get("acceptance_criteria") or []
+    if not isinstance(acs, list):
+        errors.append("acceptance_criteria must be a list")
+        acs = []
+    if not acs:
         (errors if outcome == "COMPLETE" and kind in NEEDS_AC else warnings).append("acceptance_criteria is empty")
+    for n, ac in enumerate(acs, 1):
+        status = str(ac.get("status", "")).lower() if isinstance(ac, dict) else ""
+        if outcome == "COMPLETE" and kind in NEEDS_AC and status not in AC_MET:
+            label = ac.get("id", f"#{n}") if isinstance(ac, dict) else f"#{n}"
+            errors.append(f"COMPLETE but acceptance criterion {label} is not marked met (status {status or 'missing'!r})")
+    if not isinstance(gates, dict):
+        errors.append("gates must be an object")
+        gates = {}
 
     for g in GATES:
         gate = gates.get(g)
@@ -154,8 +184,11 @@ def validate(ledger: dict) -> tuple[list[str], list[str]]:
             continue
         if st != "NOT_RUN" and len(ev) < MIN_EVIDENCE:
             errors.append(f"{g}: status {st} needs evidence or a justification (got {ev!r})")
-        if st == "NOT_APPLICABLE" and g in ALWAYS_APPLICABLE:
-            errors.append(f"{g}: cannot be NOT_APPLICABLE")
+        if st == "NOT_APPLICABLE" and (g in ALWAYS_APPLICABLE or (g == "G2" and kind in NEEDS_AC)):
+            errors.append(f"{g}: cannot be NOT_APPLICABLE" + (f" for a {kind} run" if g == "G2" else ""))
+        if st == "NOT_APPLICABLE" and g == "G3" and kind in NEEDS_AC and gate.get("reason_code") not in G3_NA_REASONS:
+            errors.append(f"G3: NOT_APPLICABLE on a {kind} run needs reason_code {sorted(G3_NA_REASONS)}; "
+                          "if tests exist but can't run, that's BLOCKED")
         if st == "PASS" and g in COMMAND_BACKED:
             cmds = gate.get("commands") or []
             if not cmds:
@@ -163,6 +196,8 @@ def validate(ledger: dict) -> tuple[list[str], list[str]]:
             for c in cmds:
                 if not isinstance(c, dict) or not c.get("cmd"):
                     errors.append(f"{g}: each command needs a 'cmd'")
+                elif type(c.get("exit_code")) is not int:
+                    errors.append(f"{g}: `{c.get('cmd')}` exit_code must be an integer, got {c.get('exit_code')!r}")
                 elif c.get("exit_code") != 0:
                     # G4 only: a red suite can still mean "no regression" if every failure is
                     # proven to fail on the base commit too. Both lists must be spelled out.
@@ -173,7 +208,15 @@ def validate(ledger: dict) -> tuple[list[str], list[str]]:
                                       + (" (for G4, list pre_existing_failures + baseline_evidence)" if g == "G4" else ""))
 
     ids = set()
-    for f in ledger.get("findings") or []:
+    findings = ledger.get("findings") or []
+    if not isinstance(findings, list):
+        errors.append("findings must be a list")
+        findings = []
+    bad = [f for f in findings if not isinstance(f, dict)]
+    if bad:
+        errors.append(f"findings must be objects, got {bad[:2]!r}")
+    findings = [f for f in findings if isinstance(f, dict)]
+    for f in findings:
         fid = f.get("id", "?")
         missing = [k for k in FINDING_FIELDS if not str(f.get(k, "")).strip()]
         if missing:
@@ -193,18 +236,22 @@ def validate(ledger: dict) -> tuple[list[str], list[str]]:
         warnings.append(f"{cycles} remediation cycles exceeds max_cycles={max_cycles}; this should have been escalated")
 
     if outcome == "COMPLETE":
-        for g, gate in gates.items():
+        for g in GATES:
+            gate = gates.get(g)
             st = gate.get("status") if isinstance(gate, dict) else None
             if st in {"FAIL", "BLOCKED"} or (st == "NOT_RUN" and g in required):
                 errors.append(f"COMPLETE but {g} is {st}")
-        for f in ledger.get("findings") or []:
+        for f in findings:
+            if f.get("severity") == "medium" and f.get("status") in {"open", "disputed"}:
+                errors.append(f"COMPLETE but medium finding {f.get('id')} is {f.get('status')} (fix it or record why not)")
             if f.get("severity") in BLOCKING:
                 if f.get("status") in {"open", "disputed"}:
                     errors.append(f"COMPLETE but {f.get('severity')} finding {f.get('id')} is {f.get('status')}")
                 elif f.get("status") == "fixed":
                     errors.append(f"COMPLETE but {f.get('severity')} finding {f.get('id')} is fixed and not independently verified")
-                elif f.get("status") == "accepted_risk" and not f.get("accepted_by_user"):
-                    errors.append(f"COMPLETE but {f.get('id')} is accepted_risk without accepted_by_user: true")
+                elif f.get("status") in {"accepted_risk", "wont_fix"} and f.get("accepted_by_user") is not True:
+                    errors.append(f"COMPLETE but {f.get('severity')} finding {f.get('id')} is {f.get('status')} "
+                                  "without accepted_by_user: true (only the user can accept that)")
     return errors, warnings
 
 
@@ -240,7 +287,7 @@ def cmd_render(a) -> int:
     if led.get("acceptance_criteria"):
         print("**Acceptance criteria**")
         for i, ac in enumerate(led["acceptance_criteria"], 1):
-            text = ac if isinstance(ac, str) else f"{ac.get('text')} — {ac.get('status', '?')}"
+            text = ac if isinstance(ac, str) else f"{ac.get('id', '')} {ac.get('text')}: {ac.get('status', '?')}".strip()
             print(f"{i}. {text}")
         print()
     print("| Gate | Status | Evidence |\n|---|---|---|")
@@ -250,8 +297,10 @@ def cmd_render(a) -> int:
         cmds = "; ".join(f"`{c.get('cmd')}`→{c.get('exit_code')}" for c in gate.get("commands") or [] if isinstance(c, dict))
         if cmds:
             ev = f"{ev} ({cmds})"
+        if gate.get("reason_code"):
+            ev = f"[{gate['reason_code']}] {ev}"
         print(f"| {g} {name} | {gate.get('status', '?')} | {ev.replace('|', '/')} |")
-    findings = led.get("findings") or []
+    findings = [f for f in (led.get("findings") or []) if isinstance(f, dict)]
     if findings:
         print("\n| ID | Sev | Status | Location | Summary |\n|---|---|---|---|---|")
         order = {s: i for i, s in enumerate(SEVERITIES)}
@@ -269,7 +318,7 @@ def main() -> int:
     i.add_argument("task")
     i.add_argument("--mode", choices=["small", "medium", "large"], default="medium")
     i.add_argument("--kind", choices=["build", "fix", "review", "test", "improve-ui"], default="build")
-    i.add_argument("--max-cycles", type=int, default=3)
+    i.add_argument("--max-cycles", type=int, default=None, help="default: project config max_cycles, else 3")
     i.set_defaults(fn=cmd_init)
     for name, fn in (("check", cmd_check), ("render", cmd_render)):
         s = sub.add_parser(name)

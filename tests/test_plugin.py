@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -92,8 +93,10 @@ class PluginStructure(unittest.TestCase):
                     self.assertNotRegex(h["command"], r"/home/|/Users/", "no absolute paths")
 
     def test_no_absolute_user_paths_anywhere(self):
-        for p in ROOT.rglob("*"):
-            if p.is_file() and ".git" not in p.parts and p.suffix in {".md", ".json", ".py", ".sh"}:
+        listed = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"], cwd=ROOT,
+                                capture_output=True, text=True).stdout.split()
+        for p in (ROOT / f for f in listed):
+            if p.is_file() and p.suffix in {".md", ".json", ".py", ".sh"}:
                 if p.name == "test_plugin.py":
                     continue
                 with self.subTest(file=str(p.relative_to(ROOT))):

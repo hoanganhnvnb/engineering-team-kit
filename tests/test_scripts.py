@@ -47,7 +47,7 @@ class LedgerTests(unittest.TestCase):
         return sh([sys.executable, str(ETK), "check", str(run)], self.dir)
 
     def complete_ledger(self, ledger):
-        ledger["acceptance_criteria"] = ["AC-1 code applies 10%"]
+        ledger["acceptance_criteria"] = [{"id": "AC-1", "text": "code applies 10%", "status": "met"}]
         for g in ledger["gates"]:
             ledger["gates"][g] = {"status": "PASS", "evidence": "checked carefully with evidence", "commands": []}
         for g in ("G3", "G4"):
@@ -173,6 +173,72 @@ class LedgerTests(unittest.TestCase):
         self.write(run, ledger)
         self.assertIn("needs a 'resolution'", self.check(run).stdout)
 
+    def test_unmet_ac_blocks_complete(self):
+        run, ledger = self.init()
+        ledger = self.complete_ledger(ledger)
+        ledger["acceptance_criteria"].append({"id": "AC-2", "text": "one code per cart", "status": "not_met"})
+        self.write(run, ledger)
+        self.assertIn("AC-2 is not marked met", self.check(run).stdout)
+        ledger["acceptance_criteria"][1] = "plain string without a status"
+        self.write(run, ledger)
+        self.assertIn("not marked met", self.check(run).stdout)
+
+    def test_build_cannot_skip_review_or_tests_by_calling_them_na(self):
+        run, ledger = self.init()
+        ledger = self.complete_ledger(ledger)
+        ledger["gates"]["G2"] = {"status": "NOT_APPLICABLE", "evidence": "small change, no review needed"}
+        ledger["gates"]["G3"] = {"status": "NOT_APPLICABLE", "evidence": "no tests in this repo at all"}
+        self.write(run, ledger)
+        out = self.check(run).stdout
+        self.assertIn("G2: cannot be NOT_APPLICABLE for a build run", out)
+        self.assertIn("G3: NOT_APPLICABLE on a build run needs reason_code", out)
+        ledger["gates"]["G2"] = {"status": "PASS", "evidence": "self-review (small mode), 1 file"}
+        ledger["gates"]["G3"]["reason_code"] = "no_test_setup"
+        self.write(run, ledger)
+        self.assertEqual(self.check(run).returncode, 0, self.check(run).stdout)
+
+    def test_wont_fix_on_high_needs_the_user(self):
+        run, ledger = self.init()
+        ledger = self.complete_ledger(ledger)
+        ledger["findings"] = [self.finding(status="wont_fix", resolution="out of scope says the Lead")]
+        self.write(run, ledger)
+        self.assertIn("only the user can accept", self.check(run).stdout)
+
+    def test_open_medium_blocks_complete(self):
+        run, ledger = self.init()
+        ledger = self.complete_ledger(ledger)
+        ledger["findings"] = [self.finding(severity="medium")]
+        self.write(run, ledger)
+        self.assertIn("medium finding R1-001 is open", self.check(run).stdout)
+        ledger["findings"][0]["status"] = "fixed"
+        self.write(run, ledger)
+        self.assertEqual(self.check(run).returncode, 0)
+
+    def test_malformed_ledger_gives_messages_not_tracebacks(self):
+        run, ledger = self.init()
+        ledger = self.complete_ledger(ledger)
+        ledger["findings"] = ["oops"]
+        ledger["gates"]["G3"]["commands"] = [{"cmd": "npm test", "exit_code": "0"}]
+        self.write(run, ledger)
+        r = self.check(run)
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("Traceback", r.stdout + r.stderr)
+        self.assertIn("findings must be objects", r.stdout)
+        self.assertIn("exit_code must be an integer", r.stdout)
+
+    def test_max_cycles_comes_from_project_config(self):
+        (self.dir / ".claude").mkdir()
+        (self.dir / ".claude" / "engineering-team.json").write_text('{"max_cycles": 5}')
+        _, ledger = self.init()
+        self.assertEqual(ledger["max_cycles"], 5)
+
+    def test_exclude_works_inside_a_worktree(self):
+        sh(["git", "worktree", "add", "-q", str(self.dir / "wt"), "-b", "wt"], self.dir)
+        wt = self.dir / "wt"
+        r = sh([sys.executable, str(ETK), "init", "x"], wt)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn(".etk", sh(["git", "status", "--porcelain"], wt).stdout)
+
     def test_review_kind_only_owns_g2_g6(self):
         run, ledger = self.init("--kind", "review")
         ledger["gates"]["G2"] = {"status": "PASS", "evidence": "reviewed git diff main, 3 files"}
@@ -207,7 +273,10 @@ class GuardTests(unittest.TestCase):
         self.assertFalse(self.blocked("git push", agent="other-plugin:agent"))
 
     def test_blocks_dangerous_git(self):
-        for cmd in ["git push", "git push --force origin x", "git reset --hard HEAD~1", "git clean -fd",
+        for cmd in ["git checkout HEAD -- src/a.js", "git checkout main -- .", "git reset HEAD~1 --hard",
+                    "git -C . push", "git -c x=y push origin", "git switch -f main",
+                    "git worktree remove --force ../wt", "cd sub && git push", "FOO=1 git push",
+                    "git push", "git push --force origin x", "git reset --hard HEAD~1", "git clean -fd",
                     "git checkout -- .", "git checkout .", "git restore src/a.ts", "git stash", "git stash pop",
                     "git branch -D feature", "git rebase main", "git commit --amend -m x"]:
             with self.subTest(cmd=cmd):
@@ -217,7 +286,11 @@ class GuardTests(unittest.TestCase):
         for cmd in ["git status", "git diff main...HEAD", "git log --oneline -5", "git stash list",
                     "git add src/a.ts && git commit -m 'Add discount parsing'", "git restore --staged a.ts",
                     "git checkout -b etk/feature", "npm test", "pytest -q", "rm -rf node_modules/.cache",
-                    "rm -rf /work/proj/build", "git worktree add ../base HEAD"]:
+                    "rm -rf /work/proj/build", "git worktree add ../base HEAD", "git worktree remove ../base",
+                    'grep -rn "git push" scripts/', 'rg "git rebase" docs', 'git log --grep="git restore"',
+                    'git commit -m "docs: never git push --force"', "echo 'npm publish' >> /dev/null",
+                    "cat > notes.md <<EOF\nrun git push and shopify app deploy later\nEOF",
+                    "rm -rf /tmp/etk-base"]:
             with self.subTest(cmd=cmd):
                 self.assertFalse(self.blocked(cmd), cmd)
 
@@ -234,7 +307,8 @@ class GuardTests(unittest.TestCase):
                 self.assertFalse(self.blocked(cmd))
 
     def test_rm_outside_project(self):
-        for cmd in ["rm -rf /", "rm -rf ~", "rm -rf ~/projects", "rm -rf ..", "rm -rf /etc/x", "rm -fr $HOME/x"]:
+        for cmd in ["rm -rf /", "rm -rf ~", "rm -rf ~/projects", "rm -rf ..", "rm -rf /etc/x", "rm -fr $HOME/x",
+                    "rm -rf ../sibling", "rm -rf ../../other", "rm -rf .", "rm -r -f src/../../x"]:
             with self.subTest(cmd=cmd):
                 self.assertTrue(self.blocked(cmd))
 
@@ -245,6 +319,46 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(self.call("Write", {"file_path": "/work/proj/.env.local", "content": "x"}).returncode, 2)
         self.assertEqual(self.call("Edit", {"file_path": "/work/proj/.env.example"}).returncode, 0)
         self.assertEqual(self.call("Write", {"file_path": "/work/proj/src/env.ts"}).returncode, 0)
+
+    def test_secret_redirects_and_bulk_add(self):
+        self.assertTrue(self.blocked("echo SECRET=1 >> .env"))
+        with tempfile.TemporaryDirectory() as tmp:
+            d = git_repo(Path(tmp))
+            (d / "a.js").write_text("x")
+            self.assertFalse(self.blocked("git add -A", cwd=str(d)))
+            (d / ".env").write_text("TOKEN=1")
+            self.assertTrue(self.blocked("git add -A", cwd=str(d)))
+            self.assertTrue(self.blocked("git add .", cwd=str(d)))
+            self.assertFalse(self.blocked("git add a.js", cwd=str(d)))
+
+    def test_read_only_roles_cannot_write_through_the_shell(self):
+        rv = "engineering-team:code-reviewer"
+        for cmd in ["echo x > src/a.js", "sed -i s/a/b/ src/a.js", "rm src/a.js", "git apply fix.patch",
+                    "tee out.txt", "cp a b", "git checkout -- ."]:
+            with self.subTest(cmd=cmd):
+                self.assertTrue(self.blocked(cmd, agent=rv))
+        for cmd in ["git diff main", "npm test > /dev/null", "npm test 2>&1 | tail -20", "cat src/a.js",
+                    "echo hi > /tmp/review-notes.txt", "grep -rn TODO src"]:
+            with self.subTest(cmd=cmd):
+                self.assertFalse(self.blocked(cmd, agent=rv))
+        self.assertFalse(self.blocked("echo x > src/a.js", agent="engineering-team:developer"))
+
+    def test_qa_may_only_create_new_files(self):
+        qa = "engineering-team:qa-engineer"
+        with tempfile.TemporaryDirectory() as tmp:
+            existing = Path(tmp) / "existing.test.js"
+            existing.write_text("x")
+            self.assertEqual(self.call("Write", {"file_path": str(existing)}, agent=qa).returncode, 2)
+            self.assertEqual(self.call("Edit", {"file_path": str(existing)}, agent=qa).returncode, 2)
+            self.assertEqual(self.call("Write", {"file_path": str(Path(tmp) / "new.test.js")}, agent=qa).returncode, 0)
+
+    def test_wrapper_skips_python_for_main_session(self):
+        wrapper = ROOT / "hooks" / "run-guard.sh"
+        main = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git push"}})
+        sub = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git push"},
+                          "agent_type": "engineering-team:developer", "cwd": "/"})
+        self.assertEqual(sh(["sh", str(wrapper)], "/", stdin=main).returncode, 0)
+        self.assertEqual(sh(["sh", str(wrapper)], "/", stdin=sub).returncode, 2)
 
     def test_bad_input_never_blocks(self):
         r = sh([sys.executable, str(GUARD)], "/", stdin="not json")
