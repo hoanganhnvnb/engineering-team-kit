@@ -404,6 +404,10 @@ class GuardTests(unittest.TestCase):
             self.assertTrue(self.blocked("cp -t . other/a.js", agent=qa, cwd=tmp))
             self.assertTrue(self.blocked("cp --target-directory=. other/a.js", agent=qa, cwd=tmp))
             self.assertTrue(self.blocked("cp -rt . other/a.js", agent=qa, cwd=tmp))
+            self.assertTrue(self.blocked("cp -t. other/a.js", agent=qa, cwd=tmp))
+            self.assertTrue(self.blocked("cp --target . other/a.js", agent=qa, cwd=tmp))
+            self.assertTrue(self.blocked("cp --targ=. other/a.js", agent=qa, cwd=tmp))
+            self.assertFalse(self.blocked("cp -r fixtures new-dir", agent=qa, cwd=tmp))
             self.assertTrue(self.blocked("cp -t src x.js", agent=rv))
 
     def test_bad_input_never_blocks(self):

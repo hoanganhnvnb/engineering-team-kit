@@ -245,8 +245,10 @@ def write_operands(prog: str, args: list[str]) -> list[str]:
                 d = args[i + 1]
             elif a.startswith("--target-directory="):
                 d = a.split("=", 1)[1]
-            elif re.match(r"^-[a-zA-Z]*t[a-zA-Z]*$", a) and a != "-t":
-                raise Blocked(f"`{prog} {a}` (combined -t) can't be checked; spell the destination out")
+            elif (a.startswith("-") and not a.startswith("--") and "t" in a and a != "-t") \
+                    or (a.startswith("--t") and a != "--target-directory"):
+                # attached (-t.), clustered (-rt) or abbreviated (--target) forms: fail closed
+                raise Blocked(f"`{prog} {a}` can't be checked; use `-t DIR` or spell the destination out")
             if d is not None:
                 srcs = [x for x in ops if x != d]
                 written = [d] + [os.path.join(d, os.path.basename(s)) for s in srcs]
