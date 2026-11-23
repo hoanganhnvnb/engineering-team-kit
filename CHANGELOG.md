@@ -3,6 +3,11 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
+## 0.1.1
+
+- Guard: refuse `cp`/`mv`/`install`/`ln` target-directory forms it can't parse
+  (`-t.`, `-rt`, `--target`) for read-only and create-only roles.
+
 ## 0.1.0
 
 First release.

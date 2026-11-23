@@ -28,7 +28,7 @@ The repository is also its own marketplace. Releases are git tags (`v0.1.0`, …
 To pin, add the marketplace at a tag:
 
 ```bash
-claude plugin marketplace add hoanganhnvnb/engineering-team-kit#v0.1.0
+claude plugin marketplace add hoanganhnvnb/engineering-team-kit#v0.1.1
 claude plugin install engineering-team@engineering-team-kit
 ```
 
@@ -90,7 +90,7 @@ Re-add the marketplace at the tag you want and reinstall:
 ```bash
 claude plugin uninstall engineering-team@engineering-team-kit
 claude plugin marketplace remove engineering-team-kit
-claude plugin marketplace add hoanganhnvnb/engineering-team-kit#v0.1.0
+claude plugin marketplace add hoanganhnvnb/engineering-team-kit#v0.1.1
 claude plugin install engineering-team@engineering-team-kit
 ```
 
