@@ -238,8 +238,21 @@ def write_operands(prog: str, args: list[str]) -> list[str]:
     ops = [a for a in args if not a.startswith("-")]
     if prog == "dd":
         return [a[3:] for a in args if a.startswith("of=")]
-    if prog in {"cp", "install", "ln"}:
-        return ops[-1:]  # only the destination is written
+    if prog in {"cp", "install", "ln", "mv"}:
+        for i, a in enumerate(args):
+            d = None
+            if a in {"-t", "--target-directory"} and i + 1 < len(args):
+                d = args[i + 1]
+            elif a.startswith("--target-directory="):
+                d = a.split("=", 1)[1]
+            elif re.match(r"^-[a-zA-Z]*t[a-zA-Z]*$", a) and a != "-t":
+                raise Blocked(f"`{prog} {a}` (combined -t) can't be checked; spell the destination out")
+            if d is not None:
+                srcs = [x for x in ops if x != d]
+                written = [d] + [os.path.join(d, os.path.basename(s)) for s in srcs]
+                return written + (srcs if prog == "mv" else [])
+        if prog != "mv":
+            return ops[-1:]  # only the destination is written
     return ops  # rm, mv (sources disappear too), chmod, chown, touch, truncate, tee, patch
 
 

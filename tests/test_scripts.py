@@ -401,6 +401,10 @@ class GuardTests(unittest.TestCase):
             self.assertTrue(self.blocked("mv a.js b.js", agent=qa, cwd=tmp))
             self.assertTrue(self.blocked("dd if=/dev/zero of=a.js", agent=qa, cwd=tmp))
             self.assertFalse(self.blocked("cp a.js new.test.js", agent=qa, cwd=tmp))
+            self.assertTrue(self.blocked("cp -t . other/a.js", agent=qa, cwd=tmp))
+            self.assertTrue(self.blocked("cp --target-directory=. other/a.js", agent=qa, cwd=tmp))
+            self.assertTrue(self.blocked("cp -rt . other/a.js", agent=qa, cwd=tmp))
+            self.assertTrue(self.blocked("cp -t src x.js", agent=rv))
 
     def test_bad_input_never_blocks(self):
         r = sh([sys.executable, str(GUARD)], "/", stdin="not json")
