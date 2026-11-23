@@ -11,6 +11,10 @@
     "start": "npm run dev",
     "url": "http://localhost:3000"
   },
+  "verify": [
+    "curl -sf http://localhost:3000/api/health",
+    "node scripts/drive-checkout.mjs"
+  ],
   "max_cycles": 3,
   "commit": false,
   "invariants": [
@@ -21,8 +25,23 @@
     "migrations/",
     "src/billing/"
   ],
+  "rules": [
+    {
+      "paths": "src/domain/**",
+      "rule": "Pure domain code: no imports from src/infra or any HTTP/DB client",
+      "check": "npx depcruise src --config .dependency-cruiser.cjs"
+    },
+    {
+      "paths": "src/ui/**",
+      "rule": "No setTimeout(..., 0) to paper over ordering bugs"
+    }
+  ],
   "agents": {
     "code-reviewer": "my-project-reviewer"
+  },
+  "models": {
+    "developer": "sonnet",
+    "code-reviewer": "opus"
   },
   "notes": "Anything else the team should know, in one or two lines."
 }

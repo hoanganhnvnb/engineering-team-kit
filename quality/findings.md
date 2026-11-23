@@ -19,7 +19,8 @@ into the ledger):
     "expected": "Discount applies to subtotal after tax rules per AC-2 (total 99.00)",
     "actual": "Total is 90.00 because tax is computed on the discounted amount",
     "remediation": "Compute tax on the pre-discount subtotal, add a test for AC-2",
-    "status": "open"
+    "status": "open",
+    "hardening": { "layer": "static", "proposal": "test: table of discount × tax cases from the pricing spec" }
   }
 ]
 ```
@@ -30,6 +31,12 @@ into the ledger):
 - `location`: `path:line`, or `path` + symbol, or a URL + selector for UI.
 - `evidence`: the thing that makes it checkable: a failing command, a code quote, a
   screenshot reference, or exact reproduction steps.
+- `category`: a short stable slug (`correctness`, `security`, `regression`, `missing-test`,
+  `pattern-spread`, `justifying-comment`, `ungrounded-cause`, `a11y`, `performance`…).
+  Keep the same slug for the same kind of problem, because `etk_run.py stats` counts recurring
+  categories to find the next check worth adding.
+- `hardening` (medium and above): the cheapest automatic check that would have caught
+  it. See [hardening.md](hardening.md).
 
 ## Severity
 

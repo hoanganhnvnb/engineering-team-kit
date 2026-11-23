@@ -20,6 +20,10 @@ Increment `cycles` in the ledger each time a fix batch goes back to a developer.
      note why. Reviewers can be wrong too.
    - Merge duplicates across reviewers (keep the lowest ID, note the others).
    - Resolve conflicts: project rules > ACs > reviewer preference. Write the reason.
+   - **Tie-breaker.** If the developer disputes a critical/high finding and the evidence
+     doesn't settle it, spawn one more reviewer on a *different* model (pass `model`,
+     e.g. `sonnet` if the reviewer ran on `opus`) with both arguments and the code.
+     Different models have different blind spots. If it's still unclear, ask the user.
 3. **Fix.** Send open critical/high/medium findings to a developer as one batch.
    Use a **fresh** developer with the original brief + the findings, because a long-lived
    agent carries its own blind spots forward. Small fixes: the Lead may fix directly.
@@ -32,6 +36,9 @@ Increment `cycles` in the ledger each time a fix batch goes back to a developer.
    (new IDs). Scope it to the changes + the findings, not a full re-review of everything.
 6. **Exit** when no critical/high is open/unverified and mediums are fixed or
    accepted with a reason. Then fill the gates.
+7. **Make it stick.** Collect the `hardening` proposals from medium+ findings and put
+   them in the report ([hardening](../quality/hardening.md)). Don't implement them
+   unasked: a new lint rule or CI step is a project change the user decides on.
 
 ## Bounds
 

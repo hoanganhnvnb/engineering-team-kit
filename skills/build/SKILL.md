@@ -3,7 +3,7 @@ name: build
 description: End-to-end feature delivery with a small AI team. The main session acts as Lead, sizes the task, delegates to developer/reviewer/QA/UX agents only when it pays off, loops on findings, and reports gate results with evidence.
 argument-hint: <feature request>
 disable-model-invocation: true
-allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py":*)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run:*)
 ---
 
 # /engineering-team:build
@@ -20,7 +20,7 @@ file only when you reach the step that needs it.
 
 ## Project snapshot
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover`
 
 ## 1. Understand (always)
 
@@ -30,7 +30,11 @@ file only when you reach the step that needs it.
    rules beat ETK defaults (except the safety rules below). Details:
    `${CLAUDE_PLUGIN_ROOT}/workflows/discovery.md`.
 3. Look at the code you'll change and one similar feature. Find the real test commands
-   (config → CI → package scripts → CLAUDE.md).
+   (config → CI → package scripts → CLAUDE.md). If answering that would take more than a
+   few file reads, send `engineering-team:scout` (cheap, fast) a numbered list of factual
+   questions instead of reading everything yourself.
+   Note the snapshot's **Hard checks** line: if it says the constraints are weak, keep
+   changes conservative and say so in the report.
 4. Write 2–7 **acceptance criteria**. If something ambiguous changes *what* gets built,
    ask one focused question with your recommended answer. Otherwise state your
    assumption and continue.
@@ -43,7 +47,7 @@ anything security-sensitive → medium (developer + independent reviewer). Sever
 independent parts with a contract between them → large.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py" init "<goal>" --mode <mode> --kind build
+sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "<goal>" --mode <mode> --kind build
 ```
 
 Write the ACs into the ledger's `acceptance_criteria` as
@@ -57,14 +61,17 @@ command once now and note the baseline (pre-existing failures) in `notes`.
 
 **Medium:** spawn `engineering-team:developer` with a brief built from
 `${CLAUDE_PLUGIN_ROOT}/workflows/briefs.md` (goal, ACs, the project context pack,
-scope, commands). If the project has its own agent for a role, prefer it.
+scope, commands). If the project has its own agent for a role, prefer it. If the project
+config has `models`, pass the matching `model` when spawning each role.
 
 **Large:** write `plan.md` in the run dir (contract + file-disjoint workstreams), then
 follow `${CLAUDE_PLUGIN_ROOT}/workflows/parallel.md` (worktree isolation via the
 Agent tool's `isolation: "worktree"`, integrate one stream at a time).
 
 When a developer reports back: look at `git diff --stat` and the key hunks yourself,
-and re-run the tests it claims. "Done" in a report is not evidence.
+and re-run the tests it claims. "Done" in a report is not evidence. For user-visible
+behavior, drive it for real once (CLI, request, driver, browser) and record that command
+with `"type": "runtime"`: tests prove code, but running it proves the feature.
 
 ## 4. Review → fix → re-test (medium/large; small = self-review of `git diff`)
 
@@ -72,6 +79,8 @@ Follow `${CLAUDE_PLUGIN_ROOT}/workflows/review-loop.md`:
 
 - Fresh `engineering-team:code-reviewer` gets the base ref + ACs, **not** the developer's summary.
 - Also spawn, in the same message so they run in parallel:
+  - a second `engineering-team:code-reviewer` with `lens: security` when the change is
+    security-sensitive (auth, permissions, payments, user data, SQL/shell/HTML from input)
   - `engineering-team:qa-engineer` when test design is non-trivial (money, data, auth,
     state, many edge cases)
   - `engineering-team:ux-reviewer` when user-facing UI changed
@@ -79,7 +88,10 @@ Follow `${CLAUDE_PLUGIN_ROOT}/workflows/review-loop.md`:
   Verify each is real, merge duplicates, settle conflicts (project rules > ACs > preference).
 - Send open critical/high/medium to a **fresh** developer as one batch; re-test; fresh
   reviewer verifies. Increment `cycles`. Stop after `max_cycles` (default 3) and report
-  `INCOMPLETE` rather than looping.
+  `INCOMPLETE` rather than looping. A disputed critical/high that evidence can't settle
+  goes to a tie-breaker reviewer on a different model.
+- Collect the findings' `hardening` proposals for the report
+  (`${CLAUDE_PLUGIN_ROOT}/quality/hardening.md`). Propose them, don't implement them unasked.
 
 ## 5. Gates
 
@@ -87,7 +99,7 @@ Fill G1–G6 in the ledger per `${CLAUDE_PLUGIN_ROOT}/quality/gates.md`. G3/G4 `
 entries list every command with its real exit code. Then:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py" check
+sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run check
 ```
 
 Set `outcome` to `COMPLETE` only if the check passes with it. Otherwise `INCOMPLETE` or
@@ -95,8 +107,11 @@ Set `outcome` to `COMPLETE` only if the check passes with it. Otherwise `INCOMPL
 
 ## 6. Remember and report
 
-- Large or unfinished tasks: update `docs/agent/CURRENT_STATE.md` (and `DECISIONS.md` for
-  decisions the user made) per `${CLAUDE_PLUGIN_ROOT}/workflows/project-memory.md`.
+- Project memory per `${CLAUDE_PLUGIN_ROOT}/workflows/project-memory.md`: for large or
+  unfinished tasks, or a user-facing feature whose verification steps are worth reusing,
+  brief `engineering-team:tech-writer` to update `docs/agent/CURRENT_STATE.md`,
+  `FEATURES.md`, and `DECISIONS.md` (only decisions the user made). Read its diff.
+  Small tasks: skip this.
 - Write the final report in the user's language using
   `${CLAUDE_PLUGIN_ROOT}/quality/report-template.md`, with the tables from
   `etk_run.py render`.

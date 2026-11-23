@@ -3,7 +3,7 @@ name: test
 description: QA pass on current changes, a feature, or the whole project. Derives test cases from requirements, runs the real test suites, probes edge cases, separates pre-existing failures from regressions, and reports coverage gaps with evidence.
 argument-hint: "[feature, area, or 'regression']"
 disable-model-invocation: true
-allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py":*)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run:*)
 ---
 
 # /engineering-team:test
@@ -14,7 +14,7 @@ You are the **Lead** running a QA pass. Nothing counts unless it actually ran.
 
 ## Project snapshot
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover`
 
 ## Steps
 
@@ -25,7 +25,7 @@ You are the **Lead** running a QA pass. Nothing counts unless it actually ran.
    package scripts → CLAUDE.md). Run the main one once yourself first. If it can't run
    at all (missing deps/services), report that as `BLOCKED` with what's missing, and
    offer the fix (e.g. "run `npm ci`").
-3. **Ledger:** `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py" init "test: <scope>" --kind test`
+3. **Ledger:** `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "test: <scope>" --kind test`
 4. **QA.** For anything bigger than a quick run, spawn `engineering-team:qa-engineer` with
    the ACs, commands, base ref, and risky areas (`${CLAUDE_PLUGIN_ROOT}/workflows/briefs.md`).
    Add `engineering-team:ux-reviewer` in parallel if the scope includes UI and a browser

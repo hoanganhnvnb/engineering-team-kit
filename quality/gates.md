@@ -55,6 +55,11 @@ project config, CI files, or CLAUDE.md over guesses.
 
 - PASS: relevant suites ran, exit 0, new or changed behavior has a test that would
   fail without the change (for bug fixes: the reproduction test).
+- Give each command a `type`: `test`, `lint`, `typecheck`, `build`, `static`, `e2e`,
+  `runtime` (the feature actually driven: CLI run, HTTP request, browser journey, driver
+  script), or `other`. Tests prove the code, but running it proves the feature. For
+  medium/large user-visible changes, record at least one `runtime` or `e2e` command (in
+  G3 or G4), or a browser-verified G5. The checker warns when there's none.
 - NOT_APPLICABLE: only with a `reason_code` on the gate: `docs_only` (no executable
   behavior changed) or `no_test_setup` (the project has no automated tests at all, e.g.
   many Liquid themes). The report must say plainly that no automated test covers the

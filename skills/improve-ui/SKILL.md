@@ -3,7 +3,7 @@ name: improve-ui
 description: Improve a screen or flow with the small AI team. Capture the current state as evidence, agree on concrete UX changes, implement them within the project's design system, and re-verify visually at desktop and mobile widths, including accessibility.
 argument-hint: <screen, route, or component> [what feels wrong]
 disable-model-invocation: true
-allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py":*)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run:*)
 ---
 
 # /engineering-team:improve-ui
@@ -15,7 +15,7 @@ evidence before and after.
 
 ## Project snapshot
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover`
 
 ## Steps
 
@@ -28,7 +28,7 @@ evidence before and after.
 2. **Check tools.** Is a browser tool available (Claude in Chrome, Playwright MCP, built-in
    browser)? If not, say up front that G5 will be at most "static review only" and
    visual verification will be `BLOCKED`.
-3. **Baseline.** Ledger: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py" init "ui: <target>" --kind improve-ui --mode medium`.
+3. **Baseline.** Ledger: `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "ui: <target>" --kind improve-ui --mode medium`.
    Spawn `engineering-team:ux-reviewer` on the current state: the journey, desktop + mobile,
    states, accessibility. Its findings (`U0-n`) are the problem list.
 4. **Decide.** Turn the user's complaint + baseline findings into ACs ("AC-1: on 375px the

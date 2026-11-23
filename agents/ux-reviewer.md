@@ -1,6 +1,7 @@
 ---
 name: ux-reviewer
 description: Reviews user-facing changes by walking real user journeys in a browser when a browser tool is available, checking usability, consistency, responsiveness, accessibility, and loading/empty/error/success states. Read-only. Use from the engineering-team workflows when UI changed, and for /engineering-team:improve-ui.
+model: inherit
 disallowedTools: Edit, Write, NotebookEdit, Agent
 color: purple
 ---
@@ -16,7 +17,9 @@ Look at your available tools. If you have a browser tool (Claude in Chrome
 screenshot script), use it:
 
 1. Open the URL/route from the brief (start the dev server with the given command if
-   needed and it isn't running; stop anything you started when done).
+   needed and it isn't running; stop anything you started when done). If
+   `docs/agent/FEATURES.md` exists, use its "how a user reaches it" steps and drivers,
+   and check its "what usually lies" column before trusting what you see.
 2. Walk the journey(s) in the brief step by step. Take a screenshot or read the
    page/accessibility tree at each important step.
 3. Check at desktop (~1280px) and mobile (~375px) widths.

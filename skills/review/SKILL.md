@@ -3,7 +3,7 @@ name: review
 description: Independent review of current changes, a branch, a commit range, or a path, using a fresh read-only reviewer (plus QA/UX when relevant). Produces verified findings with severity and evidence. Does not edit code unless asked to fix.
 argument-hint: "[base-ref | branch | path | PR number] [--fix]"
 disable-model-invocation: true
-allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py":*)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run:*)
 ---
 
 # /engineering-team:review
@@ -15,7 +15,7 @@ their findings are real before they reach the user.
 
 ## Project snapshot
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover`
 
 ## Steps
 
@@ -29,11 +29,12 @@ their findings are real before they reach the user.
 2. **Gather intent.** What was the change supposed to do? Use the user's words, the commit
    messages, PR description, or linked issue. Turn that into ACs for the reviewer. If
    nothing states the intent, review for correctness and safety only and say so.
-3. **Ledger:** `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py" init "review: <target>" --kind review`
+3. **Ledger:** `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "review: <target>" --kind review`
 4. **Review.** Small diff (< ~50 lines): you may review it yourself, but say so. Otherwise
    spawn a fresh `engineering-team:code-reviewer` (or the project's own reviewer agent)
    with the brief from `${CLAUDE_PLUGIN_ROOT}/workflows/briefs.md`. In parallel, if they
-   apply: `engineering-team:qa-engineer` (to run the tests) and
+   apply: a second reviewer with `lens: security` (security-sensitive code),
+   `engineering-team:qa-engineer` (to run the tests), and
    `engineering-team:ux-reviewer` (UI changed).
 5. **Verify findings.** Open each cited location. Drop what doesn't hold up and say why.
    Merge duplicates. Severity per `${CLAUDE_PLUGIN_ROOT}/quality/findings.md`. Record in the ledger.
@@ -42,7 +43,8 @@ their findings are real before they reach the user.
    review is done and found nothing blocking. `INCOMPLETE` means changes are requested
    (open critical/high findings).
 7. **Report:** verdict, findings table sorted by severity (from `etk_run.py render`), what
-   was and wasn't checked. Use the user's language.
+   was and wasn't checked, and the hardening proposals (which check would stop each class
+   of problem next time). Use the user's language.
 
 ## `--fix`
 

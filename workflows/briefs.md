@@ -78,12 +78,28 @@ How to start the app and the URL/route, the user journey(s) to walk, what change
 component library in use, and which states to check (loading/empty/error/success).
 State whether a browser tool is available in this session.
 
+## Scout brief
+
+A numbered list of factual questions, each answerable with paths or command output:
+"Where is the discount logic and what calls it?", "Which test files cover `src/cart`?",
+"What does CI run?", "Which existing features look like X (give 2 paths)?". Ask for
+nothing it would have to judge. Use a scout when answering would take you more than a
+few file reads. It's cheap and keeps your own context small.
+
+## Tech writer brief
+
+The audience, the files to create or update (`docs/agent/FEATURES.md`, `DECISIONS.md`,
+`CURRENT_STATE.md`, `LESSONS.md`, or a user-facing doc), the facts to record (what
+changed, how to reach and prove it, the decisions the user made), the template from
+`templates/agent-docs/`, and "verify each claim against the code; leave out what you can't".
+
 ## Choosing agents
 
 - If the project ships its own agent for a role (`.claude/agents/`, e.g. a
   `code-reviewer` that knows the domain), use it for that role. It's authoritative.
   Use the ETK agent as the fallback, or alongside it when the project agent is narrow.
-- Model: leave the default unless the project config says otherwise. For a reviewer on
-  security-sensitive or large changes, it's reasonable to pass the strongest available
-  model.
+- Model: each agent has a sensible default (see the table in `routing.md`). Pass `model`
+  only when the project config's `models` overrides it, or for a deliberate second opinion
+  on a different model (tie-breaks).
+- Lens: for reviewers, say which lens (`correctness`, `security`, `architecture`).
 - Never let two developers own the same file at the same time.

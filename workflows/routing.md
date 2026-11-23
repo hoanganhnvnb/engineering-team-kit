@@ -23,10 +23,14 @@ Any of these:
 - security-sensitive even if small (auth, permissions, payments, user data, secrets handling)
 - the user asked for review
 
-Flow: Lead writes ACs + brief → `developer` implements with tests → fresh
-`code-reviewer` reads the diff → review loop → `qa-engineer` only when test design is
-non-trivial (many edge cases, state machines, money, concurrency, data migrations)
-→ `ux-reviewer` if UI changed → gates → report.
+Flow: (`scout` first if the area is unfamiliar) → Lead writes ACs + brief →
+`developer` implements with tests → fresh `code-reviewer` reads the diff → review
+loop → `qa-engineer` only when test design is non-trivial (many edge cases, state
+machines, money, concurrency, data migrations) → `ux-reviewer` if UI changed → gates
+→ report.
+
+Security-sensitive: add a second `code-reviewer` with `lens: security` in parallel with
+the regular one. Two different angles catch more than one reviewer reading twice.
 
 ## Large: Lead designs, several Developers, integration
 
@@ -43,6 +47,24 @@ gates → report. See `workflows/parallel.md`.
 
 If you can't split it into file-disjoint pieces, it's a medium task done in
 several sequential rounds, not a large one.
+
+## Who does what, on which model
+
+The plugin's agents come with a default model, matched to the kind of work. Mechanical
+work uses a fast, cheap model, and judgement and writing use the strongest one:
+
+| Agent | Default model | Why |
+|---|---|---|
+| `scout` | haiku | finding files, collecting commands, exporting run data: speed over depth |
+| `qa-engineer` | sonnet | running suites, driving the app, comparing output: thorough and cheaper |
+| `developer` | inherit (your session's model) | you chose that model for this work |
+| `ux-reviewer` | inherit | visual and usability judgement |
+| `code-reviewer` | opus | finding real bugs needs the strongest reasoning |
+| `tech-writer` | opus | knowledge synthesis and docs must be accurate |
+
+The project config can override any of these (`"models": {"developer": "sonnet"}`). The
+Lead then passes `model` when spawning. Where verification is expensive, spend there:
+more QA/runtime checking beats more developers.
 
 ## Signals to escalate
 

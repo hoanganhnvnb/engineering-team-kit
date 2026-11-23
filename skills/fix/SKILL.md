@@ -3,7 +3,7 @@ name: fix
 description: Fix a bug with the small AI team. Reproduce it with a failing test first, find the root cause, fix minimally, review independently when the fix is non-trivial, and prove there's no regression.
 argument-hint: <bug description, error, or issue link>
 disable-model-invocation: true
-allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py":*)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run:*)
 ---
 
 # /engineering-team:fix
@@ -18,7 +18,7 @@ how to trigger it) and stop.
 
 ## Project snapshot
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover`
 
 ## Steps
 
@@ -30,14 +30,17 @@ how to trigger it) and stop.
    test setup) that fails because of the bug. Run it and see it fail for the right reason.
    If you can't reproduce it, say so, list what you tried, and ask for more information
    rather than guessing a fix.
-3. **Root cause.** Trace from the symptom to the cause. Fix the cause, not the symptom.
+3. **Root cause.** Trace from the symptom to the cause through code you actually read,
+   and cite it (`file:line`). No "smoking gun" from a stack trace or screenshot alone.
+   Fix the cause, not the symptom: no deferred timers, retries, or suppressions that just
+   hide it.
    Check whether the same mistake exists in sibling code paths, and mention them, but only
    fix them if they're clearly the same bug.
 4. **Size and ledger.** Small (obvious, 1–2 files) → you fix it. Otherwise medium: a
    developer fixes, a fresh reviewer checks. Security-sensitive or data-corrupting bugs
    are always at least medium.
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py" init "<bug>" --mode <mode> --kind fix
+   sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "<bug>" --mode <mode> --kind fix
    ```
 5. **Fix** minimally. Run the reproduction test (now green) and the module suite.
 6. **Review loop** (medium+): `${CLAUDE_PLUGIN_ROOT}/workflows/review-loop.md`. Ask the
@@ -46,8 +49,11 @@ how to trigger it) and stop.
 7. **Regression (G4):** run the wider suite + lint/typecheck. If tests were already failing
    before you started, prove they're pre-existing (run them on a temporary worktree of the
    base commit). Don't hide or delete them.
-8. **Gates + report:** fill G1–G6 (`${CLAUDE_PLUGIN_ROOT}/quality/gates.md`), run
-   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py" check`, report with
+8. **Make it stick.** Ask whether a lint rule, type, or test at a higher layer would have
+   caught this class of bug, and put the proposal in the report (see
+   `${CLAUDE_PLUGIN_ROOT}/quality/hardening.md`). Don't add it unasked.
+9. **Gates + report:** fill G1–G6 (`${CLAUDE_PLUGIN_ROOT}/quality/gates.md`), run
+   `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run check`, report with
    `${CLAUDE_PLUGIN_ROOT}/quality/report-template.md`. Include the root cause in one or
    two sentences and the reproduction test name.
 

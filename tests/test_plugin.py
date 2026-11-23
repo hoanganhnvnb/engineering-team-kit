@@ -32,10 +32,17 @@ def frontmatter(path: Path) -> dict[str, str]:
 
 class PluginStructure(unittest.TestCase):
     def test_required_commands_exist(self):
-        self.assertEqual(SKILLS, {"build", "fix", "review", "test", "improve-ui"})
+        self.assertEqual(SKILLS, {"build", "fix", "review", "test", "improve-ui", "retro"})
 
     def test_required_agents_exist(self):
-        self.assertEqual(AGENTS, {"developer", "code-reviewer", "qa-engineer", "ux-reviewer"})
+        self.assertEqual(AGENTS, {"developer", "code-reviewer", "qa-engineer", "ux-reviewer", "scout", "tech-writer"})
+
+    def test_model_tiering(self):
+        """Cheap models for mechanical work, the strongest for judgement and writing."""
+        want = {"scout": "haiku", "qa-engineer": "sonnet", "code-reviewer": "opus", "tech-writer": "opus",
+                "developer": "inherit", "ux-reviewer": "inherit"}
+        for name, model in want.items():
+            self.assertEqual(frontmatter(ROOT / "agents" / f"{name}.md").get("model"), model, name)
 
     def test_plugin_root_references_resolve(self):
         for doc in PROSE:
@@ -62,7 +69,7 @@ class PluginStructure(unittest.TestCase):
                 self.assertNotIn("permissionMode", fm, "ignored for plugin agents")
 
     def test_reviewers_are_read_only(self):
-        for name in ("code-reviewer", "ux-reviewer"):
+        for name in ("code-reviewer", "ux-reviewer", "scout"):
             tools = frontmatter(ROOT / "agents" / f"{name}.md").get("disallowedTools", "")
             for t in ("Edit", "Write"):
                 self.assertIn(t, tools, f"{name} must not be able to {t}")

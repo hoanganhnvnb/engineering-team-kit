@@ -11,11 +11,20 @@ already has. Agents pay for every token they re-read, so keep these files short.
 | `docs/agent/CURRENT_STATE.md` | What's in progress, what's done, what's blocked, latest run ledger path | Large tasks, or any task that won't finish in this session |
 | `docs/agent/DECISIONS.md` | Dated decisions with the reason and who made them | When the user makes a decision worth keeping, or a large task fixes a contract |
 | `docs/agent/ARCHITECTURE.md` | A map: main modules, how a request flows, where things live, what usually surprises people | Only if the project has no equivalent doc and discovery took real effort |
+| `docs/agent/FEATURES.md` | Feature map: what exists, how a user reaches it, what proves it works, what usually lies, reusable drivers | When a medium/large change touches a user-facing feature and verification needed steps worth reusing. Then keep it current |
+| `docs/agent/LESSONS.md` | Recurring problems and the hard check that stops each | Written by `/engineering-team:retro` |
 
 Templates are in `templates/agent-docs/`.
 
+Writing these is the `tech-writer`'s job (strong model, Markdown only, verifies every
+claim). The Lead briefs it and reads its diff.
+
 ## Rules
 
+- **One correction is not a rule.** Don't add a line to CLAUDE.md, rules files, or
+  DECISIONS.md because something went wrong once. Record it as a finding with a
+  `hardening` proposal. Rules come from the user, and the best ones end up as code
+  (lint, types, tests). See `quality/hardening.md`.
 - **Read existing docs first.** If `ARCHITECTURE.md`, an ADR folder, or a good README
   already covers it, link to it instead of copying.
 - **Facts only.** Write what the code does today, with file paths. Not what an
