@@ -387,6 +387,21 @@ class GuardTests(unittest.TestCase):
             self.assertFalse(self.blocked("echo y > new.test.js", agent=qa, cwd=tmp))
             self.assertFalse(self.blocked("npm test > /tmp/qa-out.txt", agent=qa, cwd=tmp))
 
+    def test_review_round_two_bypasses(self):
+        rv, qa = "engineering-team:code-reviewer", "engineering-team:qa-engineer"
+        self.assertTrue(self.blocked('bash -lc "git push"'))
+        self.assertTrue(self.blocked('bash -c "npm test" > src/a.js', agent=rv))
+        self.assertTrue(self.blocked("bash -c"))
+        self.assertTrue(self.blocked("rm src/a.js /tmp/x", agent=rv))
+        self.assertTrue(self.blocked("echo x >& src/a.js", agent=rv))
+        self.assertFalse(self.blocked("npm test >&2", agent=rv))
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "a.js").write_text("x")
+            self.assertTrue(self.blocked("rm a.js new.js", agent=qa, cwd=tmp))
+            self.assertTrue(self.blocked("mv a.js b.js", agent=qa, cwd=tmp))
+            self.assertTrue(self.blocked("dd if=/dev/zero of=a.js", agent=qa, cwd=tmp))
+            self.assertFalse(self.blocked("cp a.js new.test.js", agent=qa, cwd=tmp))
+
     def test_bad_input_never_blocks(self):
         r = sh([sys.executable, str(GUARD)], "/", stdin="not json")
         self.assertEqual(r.returncode, 0)

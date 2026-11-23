@@ -117,8 +117,9 @@ def redirect_targets(words: list[str]) -> list[str]:
     for i, w in enumerate(words[:-1]):
         if ">" in w and set(w) <= set("<>&|"):
             target = words[i + 1]
-            if not (w.endswith("&") or target.isdigit() or target == "-"):
-                out.append(target)
+            if w.endswith("&") and (target.isdigit() or target == "-"):
+                continue  # fd duplication like 2>&1 or >&-
+            out.append(target)
     return out
 
 
@@ -232,6 +233,16 @@ SHELL_WRITERS = {"rm", "mv", "cp", "tee", "touch", "truncate", "dd", "chmod", "c
 SAFE_SINKS = {"/dev/null", "/dev/stderr", "/dev/stdout"}
 
 
+def write_operands(prog: str, args: list[str]) -> list[str]:
+    """Paths a shell-writer command would modify."""
+    ops = [a for a in args if not a.startswith("-")]
+    if prog == "dd":
+        return [a[3:] for a in args if a.startswith("of=")]
+    if prog in {"cp", "install", "ln"}:
+        return ops[-1:]  # only the destination is written
+    return ops  # rm, mv (sources disappear too), chmod, chown, touch, truncate, tee, patch
+
+
 def writes_existing(target: str, cwd: str) -> bool:
     path = target if os.path.isabs(target) else os.path.join(cwd, target)
     return os.path.exists(path) and not scratch(path, cwd)
@@ -252,11 +263,12 @@ def check_bash(cmd: str, cwd: str, role: str, depth: int = 0) -> None:
         if prog == "eval":
             check_bash(" ".join(words[1:]), cwd, role, depth + 1)
             continue
-        if prog in SHELLS and "-c" in words[1:]:
-            idx = words.index("-c", 1)
-            if idx + 1 < len(words):
+        if prog in SHELLS:
+            idx = next((i for i, w in enumerate(words[1:], 1) if re.match(r"^-[a-zA-Z]*c[a-zA-Z]*$", w)), None)
+            if idx is not None:
+                if idx + 1 >= len(words):
+                    raise Blocked(f"`{prog} -c` without a script can't be checked")
                 check_bash(words[idx + 1], cwd, role, depth + 1)
-            continue
         line = " ".join([prog] + words[1:])
         for pattern, reason in DEPLOY:
             if re.search(pattern, line, re.I):
@@ -273,12 +285,12 @@ def check_bash(cmd: str, cwd: str, role: str, depth: int = 0) -> None:
         if create_only:
             targets = [w for w in words[1:] if not w.startswith("-")]
             if any(writes_existing(t, cwd) for t in redirect_targets(seg)) \
-                    or (prog in SHELL_WRITERS and targets and writes_existing(targets[-1], cwd)) \
+                    or (prog in SHELL_WRITERS and any(writes_existing(t, cwd) for t in write_operands(prog, words[1:]))) \
                     or (prog == "sed" and any(w.startswith("-i") for w in words[1:])):
                 raise Blocked("qa-engineer may only create new files, not change existing ones")
         if read_only:
-            targets = [w for w in words[1:] if not w.startswith("-")]
-            writes = prog in SHELL_WRITERS and not (targets and all(scratch(t, cwd) for t in targets[-1:]))
+            ops = write_operands(prog, words[1:])
+            writes = prog in SHELL_WRITERS and not (ops and all(scratch(t, cwd) for t in ops))
             if writes or (prog == "sed" and any(w.startswith("-i") for w in words[1:])) \
                     or (prog == "git" and any(w in {"add", "commit", "apply", "mv", "rm", "checkout", "restore"} for w in words[1:3])):
                 raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
