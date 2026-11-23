@@ -7,24 +7,27 @@
   plugin.json          name "engineering-team" → commands are /engineering-team:<skill>
   marketplace.json     this repo is its own marketplace (source "./")
 skills/                user-invoked commands; the main session runs them as Lead
-  build/ fix/ review/ test/ improve-ui/
+  build/ fix/ review/ test/ improve-ui/ retro/
 agents/                subagents the Lead spawns as engineering-team:<name>
-  developer.md         full tools except Agent
-  code-reviewer.md     read-only (no Edit/Write), no Agent
-  qa-engineer.md       no Edit (may Write new test files), no Agent
-  ux-reviewer.md       read-only, inherits MCP tools so it can use a browser
+  scout.md             haiku; read-only fact gathering and run-data export
+  developer.md         session model; full tools except Agent
+  code-reviewer.md     opus; read-only (no Edit/Write), no Agent; lenses
+  qa-engineer.md       sonnet; no Edit (may Write new test files), no Agent
+  ux-reviewer.md       session model; read-only, inherits MCP tools so it can use a browser
+  tech-writer.md       opus; Markdown only, verifies every claim against the code
 workflows/             reference docs the Lead reads at the step that needs them
   discovery.md routing.md briefs.md review-loop.md parallel.md project-memory.md
 quality/
-  gates.md findings.md report-template.md
+  gates.md findings.md hardening.md report-template.md
 scripts/
-  discover.py          project snapshot, injected into every command
-  etk_run.py           ledger: init / check / render / latest
+  discover.py          project snapshot (incl. hard checks, path rules), injected into every command
+  etk_run.py           ledger: init / check / render / stats / latest
 hooks/
   hooks.json           PreToolUse → run-guard.sh (exits at once unless the caller is an ETK agent)
   guard.py             parses each command segment; blocks push/deploy/discarding work/secrets,
                        shell writes by reviewers, overwrites by QA
-templates/             project config + docs/agent templates
+templates/             project config + docs/agent templates (incl. FEATURES, LESSONS)
+evals/                 `claude plugin eval` cases: behaviour tests for the skills
 tests/                 unit + structure tests, fixtures, e2e runner
 ```
 
@@ -67,11 +70,42 @@ other plugins behave.
 3. **Size + ledger.** `etk_run.py init`, then a baseline test run for medium/large.
 4. **Build.** Small: the Lead. Medium: `developer` with a brief. Large: plan.md
    (contract + file-disjoint workstreams) → worktree developers → integrate with
-   `git diff … | git apply --3way` (no commits on your branch).
-5. **Review loop.** Fresh reviewer (+QA, +UX in parallel) → Lead triages findings →
-   fresh developer fixes → re-test → fresh reviewer verifies. Max 3 cycles.
+   plain `git apply` after checking the files are untouched (no commits, nothing staged).
+5. **Review loop.** Fresh reviewer (+ a security-lens reviewer when it matters, +QA,
+   +UX in parallel) → Lead triages findings → fresh developer fixes → re-test → fresh
+   reviewer verifies. Max 3 cycles. Disputed critical/high findings get a tie-breaker
+   on a different model.
+5b. **Run it.** The developer and QA drive the change for real and record `runtime`
+   commands; the checker warns on a medium/large build without any.
 6. **Gates.** G1–G6 with evidence → `etk_run.py check` → outcome.
-7. **Report** in the user's language, plus `docs/agent/` updates for long tasks.
+7. **Report** in the user's language, with hardening proposals ("make it stick"). The
+   `tech-writer` updates `docs/agent/` when it's worth it.
+
+## Model tiering
+
+Agent frontmatter sets a default `model` per role (haiku for the scout, sonnet for QA,
+opus for review and writing, the session's model for building and UX). Project config
+`models` overrides it, and the Lead passes `model` when spawning. Rationale: mechanical
+work (finding files, exporting data, running suites) is fine on a fast model; finding
+real bugs and writing durable docs is where accuracy pays.
+
+## Learning over time
+
+Findings carry a `category` and, from medium up, a `hardening` proposal (`architecture`,
+`static`, `runtime`, `prose`). `etk_run.py stats` aggregates every ledger in `.etk/runs/`:
+outcomes, findings per run (older vs newer half), runtime-evidence share, and categories
+that recurred across runs. `/engineering-team:retro` has the scout export that, the
+tech-writer record it in `docs/agent/LESSONS.md`, and the Lead propose 1–3 hard checks as
+a ratchet (block new occurrences → clean up old ones → watch the trend). Nothing is
+added to the project unless the user agrees.
+
+## Evals
+
+`evals/` holds `claude plugin eval` cases that check behaviour, not just structure: a
+small fix stays small (no subagents), a UI change without a browser is reported honestly
+(G5 BLOCKED, not COMPLETE), and a security change gets an independent reviewer. Each case
+builds its own fixture with a scaffold script and is graded by tool-use checks, file
+regexes, and an LLM judge on a different model.
 
 ## Project compatibility
 

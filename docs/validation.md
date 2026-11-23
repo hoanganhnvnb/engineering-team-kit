@@ -73,6 +73,37 @@ and adds a test with an injection payload. A fresh reviewer verified all four fi
 One new low finding (huge ints raise `OverflowError`) stayed open, which is allowed for a
 low.
 
+## 0.2.0 re-runs
+
+Default permission mode (`acceptEdits` + the runner's narrow allowlist), final 0.2.0 skills
+and the `etk.sh` launcher.
+
+| # | Scenario | Mode picked | Agents used | Outcome | Ledger check | Independent re-run | Time / cost |
+|---|---|---|---|---|---|---|---|
+| A′ | Small bug fix (`fix`, qty overwritten) | small | none | COMPLETE | OK | `npm test` exit 0 (5 tests) | 44 s / $0.32 |
+| B′ | Feature (`build`, discount codes) | small, plus an independent reviewer | code-reviewer (2 low findings, both fixed) | COMPLETE | OK | `npm test` exit 0 (11 tests) | 154 s / $1.02 |
+
+What B′ showed about the 0.2.0 changes:
+- The snapshot's **Hard checks** section reached the report: "the project has no lint,
+  type checks or CI; adding at least lint and CI would help before larger features".
+- **Runtime verification was reported honestly.** The Lead tried to call the new function
+  directly, the runner's allowlist didn't permit it, and the report says "I did not run the
+  code outside the tests" instead of claiming it. (The runner's allowlist is deliberately
+  narrow; in a normal session you'd approve the command.)
+- It noticed the fixture's pre-existing quantity bug, said it feeds into the discount, and
+  asked before touching it instead of widening scope.
+- The Lead chose small mode for a +24-line additive change but still got an independent
+  review. That's within the routing rules (the Lead may add a reviewer when unsure).
+
+### Evals
+
+`claude plugin eval` loads and grades all three cases. Inside a nested Claude Code session
+the eval sandbox couldn't start (`Failed to create bridge sockets`, read-only temp dir),
+so the agent runs stopped at turn 0 and the scores aren't meaningful. Run them from a plain
+terminal. The attempt still found two real problems: a broken `python3` shim on PATH made
+the snapshot fail (fixed with the `etk.sh` launcher) and one grader used a key the schema
+doesn't allow.
+
 ## Problems the runs found in the plugin (and fixes)
 
 - **Snapshot injection denied outside bypass mode.** The original `!python3 … || echo …`

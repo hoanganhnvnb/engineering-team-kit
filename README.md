@@ -29,6 +29,7 @@ cheap, and the process scales up only when the change does. Installed, it adds a
 | `/engineering-team:review [ref\|PR\|path] [--fix]` | Independent read-only review with verified findings; `--fix` runs the fix loop |
 | `/engineering-team:test [scope\|regression]` | QA pass: run the real suites, probe edge cases, split new vs pre-existing failures |
 | `/engineering-team:improve-ui <screen> [problem]` | Before/after UX review with browser evidence, then implement and re-verify |
+| `/engineering-team:retro [last N]` | Look back over past runs: recurring findings, trust trend, and the 1–3 hard checks worth adding |
 
 You don't call the developer, reviewer, or QA yourself during a normal build. The Lead does.
 
@@ -82,6 +83,23 @@ Pinning a version, team-wide setup, upgrades, rollback, and uninstall:
   defaults. If your project has its own reviewer agent or a migrations skill, the
   team uses it. Shopify conventions show up only when the snapshot finds a Shopify
   app or theme. ([discovery](workflows/discovery.md))
+- **The right model for each job.** Six agents, each with a default model matched to
+  the work: a cheap `scout` (haiku) gathers facts and exports run data, `qa-engineer`
+  (sonnet) runs and drives things, `code-reviewer` and `tech-writer` (opus) do the
+  judgement and the writing, and `developer`/`ux-reviewer` use your session's model.
+  Security-sensitive changes get a second reviewer with a security lens; disputed
+  critical findings get a tie-breaker on a different model.
+  ([routing](workflows/routing.md))
+- **Run it, don't just test it.** Tests prove code; running the feature proves the
+  feature. Developers and QA drive the change for real (a request, a CLI call, a browser
+  step) and record it as `runtime` evidence. The checker warns when a medium/large build
+  finishes without any. A `docs/agent/FEATURES.md` map keeps the "how to reach it, how to
+  prove it" steps reusable.
+- **Make it stick.** Every medium+ finding carries a `hardening` proposal: the cheapest
+  automatic check (lint rule, type, test, CI step) that would have caught it. The snapshot
+  shows which hard checks the project already has and warns when they're thin, because
+  agents copy whatever patterns they find. `/engineering-team:retro` turns repeated findings
+  into a short ratchet plan. ([hardening](quality/hardening.md))
 - **Seatbelt.** A hook stops the plugin's own subagents from pushing, deploying,
   publishing, rewriting history, discarding changes, running `git stash`, or writing
   `.env`/key files. It also keeps reviewers read-only, even through the shell. Your main
@@ -100,7 +118,10 @@ Nothing is required. If you want to pin commands, invariants, or the UI URL, add
   "commands": { "test": "pnpm test", "lint": "pnpm lint", "typecheck": "pnpm tsc --noEmit" },
   "ui": { "start": "pnpm dev", "url": "http://localhost:3000" },
   "invariants": ["Order totals are computed server-side only"],
-  "protected_paths": ["prisma/migrations/"]
+  "protected_paths": ["prisma/migrations/"],
+  "rules": [{ "paths": "src/domain/**", "rule": "No imports from src/infra", "check": "pnpm depcruise src" }],
+  "verify": ["curl -sf http://localhost:3000/api/health"],
+  "models": { "developer": "sonnet" }
 }
 ```
 
@@ -124,6 +145,7 @@ For long tasks the Lead keeps short notes in `docs/agent/CURRENT_STATE.md` and
 - [Validation results](docs/validation.md): the scenarios this was tested against
 - [Known limitations](docs/limitations.md)
 - [Configuration](docs/configuration.md)
+- [Evals](evals/README.md): behaviour tests for the skills, run with `claude plugin eval`
 
 ## Development
 

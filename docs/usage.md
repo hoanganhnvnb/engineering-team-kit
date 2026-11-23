@@ -66,6 +66,22 @@ For real visual verification, a browser tool needs to be available in the sessio
 Claude in Chrome, or a Playwright MCP server). Set `ui.start` and `ui.url` in
 `.claude/engineering-team.json` so the UX reviewer knows how to open the app.
 
+## retro
+
+```
+/engineering-team:retro
+/engineering-team:retro last 10
+```
+
+Reads the run ledgers in `.etk/runs/` (`etk_run.py stats`): outcomes, findings per run
+over time, how often builds were verified by actually running them, and which finding
+categories keep coming back. The `tech-writer` records that in `docs/agent/LESSONS.md`,
+and the Lead proposes up to three hard checks (a lint rule, a type, a structural test) to
+stop the most common ones, as a ratchet plan. Nothing is added to your project unless you
+say so; if you agree, it runs as a normal `build`.
+
+Worth doing after every 10 or so runs, or when the same kind of finding feels familiar.
+
 ## Example: a Shopify repository
 
 In a Shopify theme or app repo (say, a theme with its own `liquid-conventions` skill):

@@ -28,6 +28,7 @@ Session chính sẽ đóng vai **Lead** và làm lần lượt các việc sau:
 | `/engineering-team:review [ref\|PR\|path] [--fix]` | Review độc lập, chỉ đọc. Thêm `--fix` để sửa luôn |
 | `/engineering-team:test [phạm vi\|regression]` | Đợt QA: chạy test thật, tách lỗi mới khỏi lỗi có sẵn |
 | `/engineering-team:improve-ui <màn hình>` | Review UX trước và sau khi sửa, có bằng chứng từ trình duyệt |
+| `/engineering-team:retro [last N]` | Nhìn lại các lần chạy trước: lỗi hay lặp lại, xu hướng, và 1–3 kiểm tra tự động nên thêm |
 
 ## Cài đặt
 
@@ -45,5 +46,9 @@ Cách ghim version, cài cho cả team, nâng cấp, rollback và gỡ cài đ�
 - Quy tắc quan trọng được kiểm tra bằng script (`etk_run.py check`, guard hook), không chỉ viết bằng lời.
 - Rule của project là ưu tiên cao nhất trong phạm vi của nó. Plugin chỉ áp dụng rule Shopify khi phát hiện project thật sự là Shopify.
 - Không tự commit/push/deploy, không đụng vào thay đổi chưa commit của bạn.
+- Mỗi vai trò dùng model phù hợp: `scout` (haiku) tìm file và xuất dữ liệu, `qa-engineer` (sonnet) chạy test và chạy thử, `code-reviewer` và `tech-writer` (opus) review và viết tài liệu, `developer`/`ux-reviewer` dùng model của phiên. Có thể đổi bằng `models` trong config.
+- Test chứng minh code, chạy thật mới chứng minh tính năng: developer và QA chạy thử thay đổi và ghi bằng chứng `runtime`.
+- Mỗi lỗi từ mức medium có đề xuất `hardening`, tức kiểm tra tự động rẻ nhất để lỗi đó không lặp lại. Chỉ đề xuất, bạn quyết định có áp dụng hay không.
+- Nếu không có trình duyệt (Playwright MCP hoặc Claude in Chrome), G5 sẽ là `BLOCKED`. Cách cài: `claude mcp add playwright -- npx @playwright/mcp@latest`. Xem [limitations.md](limitations.md).
 
 Một phần ý tưởng tham khảo từ các chia sẻ của Lauren Tan: [principles.md](principles.md).

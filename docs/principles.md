@@ -59,12 +59,48 @@ Parallel developers only help once a single developer + review produces clean re
 on that codebase. Large mode needs a contract and file-disjoint workstreams. If the work
 can't be split that way, it runs sequentially.
 
-## 10. Honest reports
+## 10. Verification is the step that matters
+
+Tests prove code; running the feature proves the feature. The team drives changes for
+real (a request, a CLI call, a browser step) and records it as `runtime` evidence.
+When verification is expensive, spend there: more checking beats more builders.
+→ [`agents/qa-engineer.md`](../agents/qa-engineer.md), `docs/agent/FEATURES.md`
+
+## 11. Fix the class, not the instance
+
+Order of strength: architecture that makes the bug impossible > a static check (types,
+lint, a structural test) > a runtime check > a sentence in a prompt > hoping a reviewer
+notices. Every medium+ finding gets a proposal one level up from prose. Ratchet it:
+block new occurrences first, clean up the old ones, watch the count fall. One correction
+is not a rule.
+→ [`quality/hardening.md`](../quality/hardening.md), [`skills/retro`](../skills/retro/SKILL.md)
+
+## 12. Agents copy what they see
+
+Every workaround in the codebase is a pattern the next agent will repeat, and each copy
+makes the next one more likely. Developers list "pattern risks" instead of copying them;
+reviewers count when a bad pattern spreads. Justifying comments ("we do X because the
+framework…") are treated as a smell, not documentation. A greenfield project with thin
+hard checks is flagged in the snapshot.
+
+## 13. Match the model to the work
+
+A fast model for finding files and exporting data, a thorough one for running suites,
+the strongest for review and docs. A second opinion on a different model breaks ties,
+because different models miss different things.
+→ [`workflows/routing.md`](../workflows/routing.md)
+
+## 14. Honest reports
 
 INCOMPLETE and BLOCKED are normal outcomes and get reported plainly. No "bug-free",
 no "fully tested", no visual claims without a browser.
 
 ## Credits
+
+Principles 10–13 draw on two public conference talks on building with coding agents
+([1](https://www.youtube.com/watch?v=O_zcc6Xl12g), [2](https://www.youtube.com/watch?v=Cmoh-yR-usA)):
+the trust curve, the strength ordering of checks, the correction ratchet, feature maps
+for verification, and evals as unit tests for skills.
 
 Several of these ideas (triage before planning, trust artifacts over self-reports,
 encoding lessons in structure, guarding the context window, cost-aware delegation,

@@ -12,11 +12,14 @@ always sees it.
 | `commands.test` / `lint` / `typecheck` / `e2e` / `build` | string | The commands to use for G3/G4. Beats guessing from package scripts. |
 | `ui.start` | string | How to start the app for UX review. |
 | `ui.url` | string | Where to open it. |
+| `verify` | string[] | Commands that drive the real feature (smoke request, driver script). QA and the Lead run them and record them as `runtime` evidence. |
 | `max_cycles` | int | Review/fix cycles before escalating (default 3). |
 | `commit` | bool | `true` lets the Lead commit locally at the end (never push). Default `false`. |
 | `invariants` | string[] | Business rules that must hold. Reviewers and QA check them (G4). |
 | `protected_paths` | string[] | Paths no agent changes without asking you first. |
+| `rules` | object[] | Path-scoped invariants: `{"paths": "src/domain/**", "rule": "…", "check": "<cmd>"}`. Reviewers apply each rule to changed files matching `paths` and run `check` if present. Prefer rules with a `check`: prose-only rules are the weakest kind. |
 | `agents` | object | Map an ETK role to a project agent, e.g. `{"code-reviewer": "my-reviewer"}`. |
+| `models` | object | Override an agent's model, e.g. `{"developer": "sonnet", "code-reviewer": "opus"}`. Defaults: scout→haiku, qa-engineer→sonnet, code-reviewer→opus, tech-writer→opus, developer/ux-reviewer→your session's model. |
 | `notes` | string | Anything else, in a line or two. |
 
 Example: [`templates/engineering-team.json`](../templates/engineering-team.json).
