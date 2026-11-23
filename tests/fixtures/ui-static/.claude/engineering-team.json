@@ -1,0 +1,3 @@
+{
+  "ui": { "start": "python3 -m http.server 8765", "url": "http://localhost:8765/" }
+}

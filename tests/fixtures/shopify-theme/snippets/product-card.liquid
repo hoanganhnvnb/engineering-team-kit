@@ -1,0 +1,12 @@
+{% comment %}
+  Product card.
+  Params:
+  - product: product object
+{% endcomment %}
+<div class="card">
+  <a href="{{ product.url }}" class="card__link">
+    <img src="{{ product.featured_image | image_url: width: 600 }}" alt="{{ product.featured_image.alt | escape }}" width="600" height="600" loading="lazy">
+    <h3 class="card__title">{{ product.title | escape }}</h3>
+    <span class="card__price">{{ product.price | money }}</span>
+  </a>
+</div>

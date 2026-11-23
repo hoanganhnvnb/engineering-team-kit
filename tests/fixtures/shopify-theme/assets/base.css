@@ -1,0 +1,14 @@
+:root {
+  --color-text: #1a1a1a;
+  --color-sale: #b42318;
+  --color-sold-out: #6b7280;
+  --color-new: #1d4ed8;
+  --color-on-badge: #ffffff;
+  --radius: 4px;
+  --space-1: 4px;
+  --space-2: 8px;
+}
+.card { position: relative; color: var(--color-text); }
+.badge { display: inline-block; padding: var(--space-1) var(--space-2); border-radius: var(--radius); color: var(--color-on-badge); font-size: 0.75rem; }
+.badge--sold-out { background: var(--color-sold-out); }
+.badge--new { background: var(--color-new); }

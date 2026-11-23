@@ -1,0 +1,6 @@
+{
+  "commands": { "test": "python3 -m unittest discover -s tests -v" },
+  "invariants": ["Emails are stored lower-cased", "domain never imports infra"],
+  "protected_paths": ["app/infra/schema.sql", "migrations/"],
+  "max_cycles": 3
+}

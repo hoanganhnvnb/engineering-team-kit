@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Trailnotes</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="hero">
+    <div class="title">Trailnotes</div>
+    <p class="lead">One email a week with the best hiking routes near you.</p>
+    <form id="signup" class="signup">
+      <input type="text" id="email" placeholder="Email">
+      <div class="btn" onclick="submitForm()">Go</div>
+    </form>
+    <p id="msg"></p>
+  </div>
+  <script>
+    function submitForm() {
+      var v = document.getElementById('email').value;
+      document.getElementById('msg').textContent = v ? 'Thanks!' : '';
+    }
+  </script>
+</body>
+</html>

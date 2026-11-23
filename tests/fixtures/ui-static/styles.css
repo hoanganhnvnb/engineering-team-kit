@@ -1,0 +1,16 @@
+:root {
+  --bg: #ffffff;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --accent: #15803d;
+  --on-accent: #ffffff;
+  --radius: 8px;
+  --space: 16px;
+}
+body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+.hero { width: 720px; margin: 80px auto; }
+.title { font-size: 48px; font-weight: 700; }
+.lead { color: #c4c4c4; }
+.signup { display: flex; gap: 8px; }
+.signup input { padding: 6px; border: 1px solid #eee; }
+.btn { background: var(--accent); color: var(--on-accent); padding: 6px 10px; border-radius: var(--radius); cursor: pointer; }

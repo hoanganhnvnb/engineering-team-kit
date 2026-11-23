@@ -1,0 +1,8 @@
+{
+  "products": {
+    "product": {
+      "sold_out": "Sold out",
+      "new": "New"
+    }
+  }
+}
