@@ -360,6 +360,33 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(sh(["sh", str(wrapper)], "/", stdin=main).returncode, 0)
         self.assertEqual(sh(["sh", str(wrapper)], "/", stdin=sub).returncode, 2)
 
+    def test_nested_shells_are_checked(self):
+        for cmd in ['bash -c "git push"', "sh -c 'cd x && git reset --hard'", 'eval "git push"',
+                    'echo $(git push)', 'echo `git stash`', "bash <<EOF\ngit push origin main\nEOF",
+                    'rm -rf "$TARGET"', "rm -rf $HOME/x"]:
+            with self.subTest(cmd=cmd):
+                self.assertTrue(self.blocked(cmd))
+        self.assertFalse(self.blocked('bash -c "npm test"'))
+        self.assertFalse(self.blocked('echo "$(git rev-parse HEAD)"'))
+
+    def test_redirect_forms(self):
+        rv = "engineering-team:code-reviewer"
+        for cmd in ["npm test &> src/log.txt", "npm test 2> src/err.txt", "echo x >| src/a.js", "echo x &>> .env"]:
+            with self.subTest(cmd=cmd):
+                self.assertTrue(self.blocked(cmd, agent=rv))
+        self.assertFalse(self.blocked("npm test 2>&1 | tail -5", agent=rv))
+        self.assertTrue(self.blocked("echo x &> .env"))
+
+    def test_qa_cannot_overwrite_through_the_shell(self):
+        qa = "engineering-team:qa-engineer"
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "src.js").write_text("x")
+            for cmd in ["echo y > src.js", "sed -i s/x/y/ src.js", "cp other.js src.js"]:
+                with self.subTest(cmd=cmd):
+                    self.assertTrue(self.blocked(cmd, agent=qa, cwd=tmp))
+            self.assertFalse(self.blocked("echo y > new.test.js", agent=qa, cwd=tmp))
+            self.assertFalse(self.blocked("npm test > /tmp/qa-out.txt", agent=qa, cwd=tmp))
+
     def test_bad_input_never_blocks(self):
         r = sh([sys.executable, str(GUARD)], "/", stdin="not json")
         self.assertEqual(r.returncode, 0)

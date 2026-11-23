@@ -8,7 +8,9 @@ them, and a plugin should not change how unrelated sessions behave.
 
 Commands are split into segments (&&, ||, ;, |, newlines) and each segment is
 judged by the program it actually runs, so `grep "git push" docs/` or a commit
-message mentioning `rebase` is fine, while `git -C . push` is not.
+message mentioning `rebase` is fine, while `git -C . push` is not. Nested shells
+(`bash -c`, `eval`, `$(...)`, backticks) are checked recursively, and heredoc
+bodies are checked line by line like any other command text (fail closed).
 
 Blocks (exit 2, reason on stderr so the agent can adapt):
   - pushing, merging PRs, publishing, deploying, infra changes
@@ -54,24 +56,29 @@ def is_secret(path: str) -> bool:
     return bool(SECRET_NAME.search(p)) and not SECRET_OK.search(p)
 
 
-def strip_heredocs(cmd: str) -> str:
-    """Drop heredoc bodies: their text is data, not commands."""
-    out, lines, i = [], cmd.split("\n"), 0
-    while i < len(lines):
-        line = lines[i]
-        out.append(line)
-        m = re.search(r"<<-?\s*['\"]?(\w+)['\"]?", line)
-        i += 1
-        if m:
-            end = m.group(1)
-            while i < len(lines) and lines[i].strip() != end:
-                i += 1
-            i += 1
-    return "\n".join(out)
+SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+MAX_DEPTH = 4
+
+
+def substitutions(cmd: str) -> list[str]:
+    """Bodies of $(...) and `...` so they get checked as commands too."""
+    out = re.findall(r"`([^`]*)`", cmd)
+    i = 0
+    while True:
+        start = cmd.find("$(", i)
+        if start < 0:
+            break
+        depth, j = 1, start + 2
+        while j < len(cmd) and depth:
+            depth += {"(": 1, ")": -1}.get(cmd[j], 0)
+            j += 1
+        out.append(cmd[start + 2:j - 1])
+        i = start + 2
+    return out
 
 
 def segments(cmd: str) -> list[list[str]]:
-    text = strip_heredocs(cmd).replace("\n", " ; ")
+    text = cmd.replace("\n", " ; ")
     lex = shlex.shlex(text, posix=True, punctuation_chars=";&|<>()")
     lex.whitespace_split = True
     lex.commenters = ""
@@ -105,7 +112,14 @@ def program(words: list[str]) -> list[str]:
 
 
 def redirect_targets(words: list[str]) -> list[str]:
-    return [words[i + 1] for i, w in enumerate(words) if w in {">", ">>", ">|"} and i + 1 < len(words)]
+    """Targets of >, >>, >|, &>, &>>, N> (fd duplications like 2>&1 are skipped)."""
+    out = []
+    for i, w in enumerate(words[:-1]):
+        if ">" in w and set(w) <= set("<>&|"):
+            target = words[i + 1]
+            if not (w.endswith("&") or target.isdigit() or target == "-"):
+                out.append(target)
+    return out
 
 
 def inside(path: str, base: str) -> bool:
@@ -121,6 +135,12 @@ def temp_roots() -> list[str]:
 def in_temp(path: str, cwd: str) -> bool:
     p = path if os.path.isabs(path) else os.path.join(cwd, path)
     return any(inside(p, t) for t in temp_roots())
+
+
+def scratch(path: str, cwd: str) -> bool:
+    """A temp path that is not part of the project (projects can live under /tmp too)."""
+    p = path if os.path.isabs(path) else os.path.join(cwd, path)
+    return in_temp(p, cwd) and not inside(p, cwd)
 
 
 def untracked_secrets(cwd: str) -> list[str]:
@@ -189,8 +209,10 @@ def check_rm(args: list[str], cwd: str) -> None:
     if not recursive:
         return
     for target in (a for a in args if not a.startswith("-")):
-        if target in {"/", "~", "*", "./*", ".", ".."} or target.startswith(("~", "$HOME", "${HOME}")):
+        if target in {"/", "~", "*", "./*", ".", ".."} or target.startswith("~"):
             raise Blocked(f"`rm -r {target}` is too broad")
+        if "$" in target or "`" in target:
+            raise Blocked(f"`rm -r {target}` uses a variable; spell the path out so it can be checked")
         path = target if os.path.isabs(target) else os.path.join(cwd, target)
         if (inside(path, cwd) and os.path.realpath(path) != os.path.realpath(cwd)) or in_temp(path, cwd):
             continue
@@ -210,13 +232,31 @@ SHELL_WRITERS = {"rm", "mv", "cp", "tee", "touch", "truncate", "dd", "chmod", "c
 SAFE_SINKS = {"/dev/null", "/dev/stderr", "/dev/stdout"}
 
 
-def check_bash(cmd: str, cwd: str, role: str) -> None:
+def writes_existing(target: str, cwd: str) -> bool:
+    path = target if os.path.isabs(target) else os.path.join(cwd, target)
+    return os.path.exists(path) and not scratch(path, cwd)
+
+
+def check_bash(cmd: str, cwd: str, role: str, depth: int = 0) -> None:
+    if depth > MAX_DEPTH:
+        raise Blocked("command nests shells too deeply to check")
+    for inner in substitutions(cmd):
+        check_bash(inner, cwd, role, depth + 1)
     read_only = role in READ_ONLY_ROLES
+    create_only = role == "qa-engineer"
     for seg in segments(cmd):
         words = program(seg)
         if not words:
             continue
         prog = os.path.basename(words[0])
+        if prog == "eval":
+            check_bash(" ".join(words[1:]), cwd, role, depth + 1)
+            continue
+        if prog in SHELLS and "-c" in words[1:]:
+            idx = words.index("-c", 1)
+            if idx + 1 < len(words):
+                check_bash(words[idx + 1], cwd, role, depth + 1)
+            continue
         line = " ".join([prog] + words[1:])
         for pattern, reason in DEPLOY:
             if re.search(pattern, line, re.I):
@@ -228,11 +268,17 @@ def check_bash(cmd: str, cwd: str, role: str) -> None:
         for target in redirect_targets(seg):
             if is_secret(target):
                 raise Blocked(f"writing to `{target}` (looks like a secrets file)")
-            if read_only and target not in SAFE_SINKS and not in_temp(target, cwd):
+            if read_only and target not in SAFE_SINKS and not scratch(target, cwd):
                 raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
+        if create_only:
+            targets = [w for w in words[1:] if not w.startswith("-")]
+            if any(writes_existing(t, cwd) for t in redirect_targets(seg)) \
+                    or (prog in SHELL_WRITERS and targets and writes_existing(targets[-1], cwd)) \
+                    or (prog == "sed" and any(w.startswith("-i") for w in words[1:])):
+                raise Blocked("qa-engineer may only create new files, not change existing ones")
         if read_only:
             targets = [w for w in words[1:] if not w.startswith("-")]
-            writes = prog in SHELL_WRITERS and not (targets and all(in_temp(t, cwd) for t in targets[-1:]))
+            writes = prog in SHELL_WRITERS and not (targets and all(scratch(t, cwd) for t in targets[-1:]))
             if writes or (prog == "sed" and any(w.startswith("-i") for w in words[1:])) \
                     or (prog == "git" and any(w in {"add", "commit", "apply", "mv", "rm", "checkout", "restore"} for w in words[1:3])):
                 raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
