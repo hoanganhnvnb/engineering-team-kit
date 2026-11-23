@@ -83,7 +83,9 @@ Pinning a version, team-wide setup, upgrades, rollback, and uninstall:
   app or theme. ([discovery](workflows/discovery.md))
 - **Seatbelt.** A hook stops the plugin's own subagents from pushing, deploying,
   publishing, rewriting history, discarding changes, running `git stash`, or writing
-  `.env`/key files. Your main session and other plugins aren't affected.
+  `.env`/key files. It also keeps reviewers read-only, even through the shell. Your main
+  session and other plugins aren't affected: the hook's shell wrapper exits right away
+  for them.
   ([guard](hooks/guard.py))
 
 ## Optional project config

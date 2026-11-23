@@ -32,14 +32,20 @@ If the contract itself is code (types, schema, interface file), have one develop
 
 Each worktree developer commits on its own branch and reports the branch name.
 Bring the changes into the main checkout **without** creating commits on the user's
-branch (unless the user allowed commits):
+branch (unless the user allowed commits), and without touching the index:
 
 ```bash
-git diff HEAD...<worktree-branch> --binary | git apply --3way
+git diff HEAD...<branch> --binary > .etk/runs/<id>/<stream>.patch
+git diff --name-only HEAD...<branch>        # make sure none of these have uncommitted user edits:
+git diff --quiet -- <those paths>           #   non-zero exit → stop and ask the user
+git apply --check .etk/runs/<id>/<stream>.patch && git apply .etk/runs/<id>/<stream>.patch
 ```
 
-Do it one stream at a time. Run the tests after each. Conflicts mean the
-breakdown had overlap: resolve by hand, note it in the ledger.
+Plain `git apply` changes only the working tree. If it doesn't apply cleanly, the
+breakdown had overlap: apply by hand (read the patch, edit the files), note it in the
+ledger. Avoid `--3way` here: it stages files in the user's index.
+
+Do it one stream at a time. Run the tests after each.
 
 Then clean up worktrees you created (`git worktree remove <path>`, `git branch -D
 <branch>` for the temporary branch only, after its changes are applied and verified).

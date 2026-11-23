@@ -29,6 +29,10 @@ Before code is written: restate the goal and turn the request into 2–7 testabl
 acceptance criteria (ACs). Record assumptions explicitly. At the end, every AC is
 marked met / not met with a pointer to evidence (test name, screenshot, command output).
 
+In the ledger each AC is an object:
+`{"id": "AC-1", "text": "…", "status": "met | not_met | pending", "evidence": "test `…`"}`.
+The checker refuses `COMPLETE` unless every AC is `met`.
+
 - PASS: every AC met with evidence.
 - FAIL: an AC is not met.
 - Never NOT_APPLICABLE.
@@ -42,6 +46,7 @@ reviewer agent) read the actual diff, not the developer's summary.
   or explicitly accepted with a reason.
 - Small mode: the Lead may self-review with `git diff`. Say so in the evidence:
   "self-review (small mode), diff of 1 file / 6 lines".
+- Never NOT_APPLICABLE on a build/fix/improve-ui run: there is always a diff to look at.
 
 ## G3: Automated tests
 
@@ -50,7 +55,10 @@ project config, CI files, or CLAUDE.md over guesses.
 
 - PASS: relevant suites ran, exit 0, new or changed behavior has a test that would
   fail without the change (for bug fixes: the reproduction test).
-- NOT_APPLICABLE: only for changes with no executable behavior (docs, copy) and say so.
+- NOT_APPLICABLE: only with a `reason_code` on the gate: `docs_only` (no executable
+  behavior changed) or `no_test_setup` (the project has no automated tests at all, e.g.
+  many Liquid themes). The report must say plainly that no automated test covers the
+  change. If tests exist but can't run here, that's `BLOCKED`, not N/A.
 - BLOCKED: the suite cannot run here (missing DB, secrets). Say what was tried.
 
 ## G4: Regression
@@ -97,9 +105,12 @@ scopes).
 1. No gate is `FAIL` or `BLOCKED`, and no gate the run owns is `NOT_RUN`. build/fix/improve-ui
    own all six. A `review` run owns G2 + G6, a `test` run owns G3 + G4. Gates outside
    that may stay `NOT_RUN`, and the report says they weren't checked.
-2. No critical/high finding is `open`, `disputed`, or `fixed` but unverified.
-3. `accepted_risk` on a critical/high finding has `accepted_by_user: true`, meaning the
-   user actually said so in this conversation. The Lead cannot accept risk for the user.
+2. Every acceptance criterion is `met`.
+3. No critical/high finding is `open`, `disputed`, or `fixed` but unverified, and no
+   medium finding is `open` or `disputed`.
+4. `accepted_risk` or `wont_fix` on a critical/high finding has `accepted_by_user: true`,
+   meaning the user actually said so in this conversation. The Lead cannot accept risk
+   for the user.
 
 Otherwise the outcome is `INCOMPLETE` (work remains) or `BLOCKED` (needs the user),
 and the report says exactly what is missing.

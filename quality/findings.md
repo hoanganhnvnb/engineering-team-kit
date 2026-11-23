@@ -52,6 +52,8 @@ open ──► fixed ──► verified          (reviewer re-checked the code/t
   └────► accepted_risk               (critical/high: only with the user's explicit OK)
 ```
 
+`wont_fix` on a critical/high finding also needs `accepted_by_user: true`.
+
 - **The developer** marks `fixed` with what changed and how it was tested, or `disputed`
   with evidence (a test, a doc, a project rule). "I think it's fine" is not a dispute.
 - **The reviewer** marks `verified` only after looking at the new code. They do not take

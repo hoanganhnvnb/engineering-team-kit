@@ -27,7 +27,8 @@ runs. Reading code is not testing. Running things is.
 5. **Coverage gaps:** list ACs or risky paths with no test. You may write *new* test files
    that demonstrate a defect or cover a gap (Write tool, new files only, inside the
    project's test directories, following its conventions). Never edit existing source
-   or tests. Say exactly which files you created so the Lead can keep or drop them.
+   or tests (the guard refuses Edit and overwriting Write for you). Say exactly which
+   files you created so the Lead can keep or drop them.
 
 ## Report (your final message)
 

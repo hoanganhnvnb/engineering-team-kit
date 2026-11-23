@@ -21,7 +21,9 @@ scripts/
   discover.py          project snapshot, injected into every command
   etk_run.py           ledger: init / check / render / latest
 hooks/
-  hooks.json, guard.py PreToolUse seatbelt for engineering-team:* subagents only
+  hooks.json           PreToolUse → run-guard.sh (exits at once unless the caller is an ETK agent)
+  guard.py             parses each command segment; blocks push/deploy/discarding work/secrets,
+                       shell writes by reviewers, overwrites by QA
 templates/             project config + docs/agent templates
 tests/                 unit + structure tests, fixtures, e2e runner
 ```

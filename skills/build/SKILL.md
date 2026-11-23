@@ -45,7 +45,9 @@ independent parts with a contract between them → large.
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/etk_run.py" init "<goal>" --mode <mode> --kind build
 ```
 
-Write the ACs into the ledger's `acceptance_criteria`. Medium/large: run the main test
+Write the ACs into the ledger's `acceptance_criteria` as
+`{"id": "AC-1", "text": "…", "status": "pending"}` and mark each `met`/`not_met` with
+`evidence` at the end. Medium/large: run the main test
 command once now and note the baseline (pre-existing failures) in `notes`.
 
 ## 3. Build
