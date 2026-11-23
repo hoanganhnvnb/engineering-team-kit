@@ -15,7 +15,8 @@ worth it), loops on real findings until they're fixed, and gives you a report
 where every "passed" has a command and an exit code behind it.
 
 It's built for solo developers and small teams: most tasks stay small and
-cheap, and the process scales up only when the change does.
+cheap, and the process scales up only when the change does. Installed, it adds about
+600 tokens to a session; the workflows load only when you run a command.
 
 [Tiếng Việt](docs/README.vi.md)
 

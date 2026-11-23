@@ -22,7 +22,8 @@ Running log of building ETK itself. Newest state at the top of each phase.
 - **`git stash` blocked for subagents.** It rewrites the working tree the user is using.
   Base comparisons use a temporary worktree instead.
 - **Integration without commits.** Large-mode worktree branches are applied with
-  `git diff … | git apply --3way`, so the user's branch gets no surprise commits.
+  plain `git apply` (working tree only, never the index), so the user's branch gets no
+  surprise commits or staged files.
 - **Ledger in `.etk/`, excluded via `.git/info/exclude`.** Keeps `git status` clean without
   editing the project's tracked `.gitignore`.
 
