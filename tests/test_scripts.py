@@ -257,6 +257,113 @@ class LedgerTests(unittest.TestCase):
         self.assertIn("R1-001", out)
         self.assertEqual(sh([sys.executable, str(ETK), "latest"], self.dir).stdout.strip(), str(run))
 
+    def test_command_type_validated(self):
+        run, ledger = self.init()
+        ledger["gates"]["G3"]["commands"] = [{"cmd": "npm test", "exit_code": 0, "type": "bogus"}]
+        self.write(run, ledger)
+        self.assertIn("type must be one of", self.check(run).stdout)
+        ledger["gates"]["G3"]["commands"][0]["type"] = "test"
+        self.write(run, ledger)
+        self.assertEqual(self.check(run).returncode, 0)
+
+    def test_runtime_verification_warning(self):
+        run, ledger = self.init()
+        ledger = self.complete_ledger(ledger)
+        ledger["gates"]["G5"] = {"status": "NOT_APPLICABLE", "evidence": "no UI in this change at all"}
+        self.write(run, ledger)
+        r = self.check(run)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("no runtime verification recorded", r.stdout)
+        ledger["gates"]["G4"]["commands"].append({"cmd": "node server.js & curl :3000", "exit_code": 0, "type": "runtime"})
+        self.write(run, ledger)
+        self.assertNotIn("no runtime verification", self.check(run).stdout)
+        ledger["gates"]["G4"]["commands"].pop()
+        ledger["gates"]["G5"] = {"status": "PASS", "evidence": "walked the flow in the browser"}
+        self.write(run, ledger)
+        self.assertNotIn("no runtime verification", self.check(run).stdout)
+        ledger["gates"]["G5"] = {"status": "NOT_APPLICABLE", "evidence": "no UI in this change at all"}
+        ledger["mode"] = "small"
+        self.write(run, ledger)
+        self.assertNotIn("no runtime verification", self.check(run).stdout)
+
+    def test_hardening_validation_and_render(self):
+        run, ledger = self.init()
+        ledger["findings"] = [self.finding(hardening={"layer": "nope", "proposal": "x"})]
+        self.write(run, ledger)
+        self.assertIn("hardening.layer", self.check(run).stdout)
+        ledger["findings"] = [self.finding(hardening={"layer": "static", "proposal": " "})]
+        self.write(run, ledger)
+        self.assertIn("hardening.proposal", self.check(run).stdout)
+        ledger["findings"] = [self.finding(category=3)]
+        self.write(run, ledger)
+        self.assertIn("category must be a string", self.check(run).stdout)
+        ledger["findings"] = [self.finding(category="authz", hardening={"layer": "static", "proposal": "lint rule for route guards"})]
+        self.write(run, ledger)
+        self.assertEqual(self.check(run).returncode, 0)
+        out = sh([sys.executable, str(ETK), "render"], self.dir).stdout
+        self.assertIn("Hardening proposals", out)
+        self.assertIn("- R1-001 [static] lint rule for route guards", out)
+
+    def test_malformed_new_fields_report_instead_of_crash(self):
+        run, _ = self.init()
+        for bad in ({"commands": 5}, {"commands": [{"cmd": "x", "exit_code": 0, "type": ["runtime"]}]}):
+            ledger = json.loads((run / "gates.json").read_text())
+            ledger["gates"]["G3"].update(bad)
+            self.write(run, ledger)
+            r = self.check(run)
+            self.assertEqual(r.returncode, 1, bad)
+            self.assertNotIn("Traceback", r.stderr + r.stdout)
+        ledger["gates"]["G3"]["commands"] = []
+        ledger["mode"] = ["medium"]
+        ledger["findings"] = [self.finding(hardening={"layer": ["static"], "proposal": "x"})]
+        self.write(run, ledger)
+        r = self.check(run)
+        self.assertNotIn("Traceback", r.stderr + r.stdout)
+
+    def test_stats_survives_hand_edited_ledgers(self):
+        bad = {"kind": ["build"], "mode": "medium", "findings": 5, "gates": {"G3": {"commands": 5}}}
+        worse = {"kind": "fix", "findings": [{"severity": ["high"], "category": 3}], "gates": []}
+        for name, led in (("20260101-x", bad), ("20260102-y", worse)):
+            d = self.dir / ".etk" / "runs" / name
+            d.mkdir(parents=True)
+            (d / "gates.json").write_text(json.dumps(led))
+        r = sh([sys.executable, str(ETK), "stats", "--json"], self.dir)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["runs"], 2)
+        self.assertEqual(sh([sys.executable, str(ETK), "stats"], self.dir).returncode, 0)
+
+    def make_run(self, name, findings=(), kind="build", outcome="COMPLETE", runtime=False):
+        d = self.dir / ".etk" / "runs" / name
+        d.mkdir(parents=True)
+        cmds = [{"cmd": "run", "exit_code": 0, "type": "runtime"}] if runtime else []
+        (d / "gates.json").write_text(json.dumps({
+            "kind": kind, "mode": "medium", "outcome": outcome, "cycles": 1,
+            "gates": {"G3": {"commands": cmds}}, "findings": list(findings)}))
+
+    def test_stats(self):
+        hard = {"layer": "static", "proposal": "lint rule for N+1"}
+        self.make_run("20260101-a", [self.finding(id="a1", severity="medium", category="perf", hardening=hard),
+                                     self.finding(id="a2", severity="low", category="style")])
+        self.make_run("20260102-b", [self.finding(id="b1", severity="medium", category="perf")], runtime=True)
+        self.make_run("20260103-c", [], outcome="INCOMPLETE")
+        (self.dir / ".etk" / "runs" / "20260104-bad").mkdir()
+        (self.dir / ".etk" / "runs" / "20260104-bad" / "gates.json").write_text("{nope")
+        r = sh([sys.executable, str(ETK), "stats", "--json"], self.dir)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = json.loads(r.stdout)
+        self.assertEqual(d["runs"], 3)
+        self.assertEqual(d["by_outcome"], {"COMPLETE": 2, "INCOMPLETE": 1})
+        self.assertEqual(d["findings_by_severity"], {"medium": 2, "low": 1})
+        self.assertEqual([c["category"] for c in d["ratchet_candidates"]], ["perf"])
+        self.assertEqual(d["ratchet_candidates"][0]["proposals"], ["[static] lint rule for N+1"])
+        self.assertEqual(d["trust"]["trend"], "down")  # older 2 findings, newer 0.5
+        self.assertEqual(d["trust"]["runtime_verified_share"], 0.33)
+        self.assertEqual(len(d["warnings"]), 1)
+        md = sh([sys.executable, str(ETK), "stats", "--last", "3"], self.dir).stdout
+        self.assertIn("2 run(s)", md)
+        self.assertNotIn("Traceback", md)
+        self.assertIn("Ratchet candidates", sh([sys.executable, str(ETK), "stats"], self.dir).stdout)
+
 
 class GuardTests(unittest.TestCase):
     def call(self, tool, inp, agent="engineering-team:developer", cwd="/work/proj"):
@@ -410,6 +517,49 @@ class GuardTests(unittest.TestCase):
             self.assertFalse(self.blocked("cp -r fixtures new-dir", agent=qa, cwd=tmp))
             self.assertTrue(self.blocked("cp -t src x.js", agent=rv))
 
+    def test_scout_and_tech_writer_roles(self):
+        sc, tw = "engineering-team:scout", "engineering-team:tech-writer"
+        self.assertTrue(self.blocked("echo x > notes.md", agent=sc))
+        self.assertEqual(self.call("Write", {"file_path": "/work/proj/a.md"}, agent=sc).returncode, 2)
+        self.assertFalse(self.blocked("git log --oneline -20", agent=sc))
+        self.assertEqual(self.call("Write", {"file_path": "/work/proj/docs/agent/FEATURES.md"}, agent=tw).returncode, 0)
+        self.assertEqual(self.call("Edit", {"file_path": "/work/proj/src/app.ts"}, agent=tw).returncode, 2)
+        self.assertTrue(self.blocked("sed -i s/a/b/ README.md", agent=tw))
+
+    def test_docs_only_role_leaves_agent_instructions_alone(self):
+        tw = "engineering-team:tech-writer"
+        for path in ("/work/proj/CLAUDE.md", "/work/proj/CLAUDE.local.md", "/work/proj/.github/copilot-instructions.md", "/work/proj/.claude/agents/x.md", "/work/proj/skills/a/SKILL.md",
+                     "/work/proj/sub/AGENTS.md", "/work/proj/.claude/rules/r.md"):
+            self.assertEqual(self.call("Write", {"file_path": path}, agent=tw).returncode, 2, path)
+        self.assertEqual(self.call("Write", {"file_path": "/work/proj/README.md"}, agent=tw).returncode, 0)
+        self.assertEqual(self.call("Edit", {"file_path": "/work/proj/docs/guide.MD"}, agent=tw).returncode, 0)
+
+    def test_read_only_roles_cannot_write_via_tools_or_inline_code(self):
+        for agent in ("engineering-team:scout", "engineering-team:code-reviewer", "engineering-team:tech-writer"):
+            for cmd in ("perl -pi -e 's/a/b/' src/app.js", "npx prettier --write src/app.js", "npx eslint --fix src",
+                        "node -e \"require('fs').writeFileSync('src/a.js','x')\"",
+                        "python3 -c \"open('src/a.py','w').write('x')\"",
+                        "ruby -i.bak -pe 'x' src/a.rb",
+                        "python3.11 -c \"open('src/a.py','w').write('x')\"",
+                        "/usr/bin/nodejs -e \"require('fs').writeFileSync('a','x')\""):
+                self.assertTrue(self.blocked(cmd, agent=agent), (agent, cmd))
+        rv = "engineering-team:code-reviewer"
+        for cmd in ("python3 -c \"import json; print(json.load(open('package.json'))['name'])\"",
+                    "node -e \"console.log(require('./package.json').version)\"",
+                    "npx eslint src", "npx prettier --check src", "perl -ne 'print if /TODO/' src/a.js",
+                    "perl -Ilib t/test.pl", "ruby -Ilib -e 'puts 1'", "perl -mstrict -e 'print 1'",
+                    "python3 -c \"print(open('x').read())\"", "python3 -c \"open('a')\"",
+                    "grep -rn shutil. src && node --version", "black --check .", "ruff format --check src",
+                    "git log -p | grep \"open(f, 'w')\"", "python3 -m pytest -q"):
+            self.assertFalse(self.blocked(cmd, agent=rv), cmd)
+        for cmd in ("/usr/bin/env python3 -c \"open('x','w')\"", "env python3 -c \"open('x', mode='a')\"",
+                    "npx prettier -w src", "ruff format src", "black .", "gofmt -w main.go", "rubocop -A",
+                    "sed --in-place s/a/b/ f", "python3 -c \"import os; os.replace('a','b')\"",
+                    "python3 -c \"import subprocess; subprocess.run(['rm','f'])\"",
+                    "node -e \"require('fs').copyFileSync('a','b')\"", "perl -e 'open(F, \">f\")'",
+                    "echo \"open('x','w')\" | python3", "python3 - <<'EOF'\nopen('x','w').write('y')\nEOF"):
+            self.assertTrue(self.blocked(cmd, agent=rv), cmd)
+
     def test_bad_input_never_blocks(self):
         r = sh([sys.executable, str(GUARD)], "/", stdin="not json")
         self.assertEqual(r.returncode, 0)
@@ -457,6 +607,69 @@ class DiscoverTests(unittest.TestCase):
             r = sh([sys.executable, str(DISCOVER)], tmp)
             self.assertEqual(r.returncode, 0)
             self.assertIn("not a repository", r.stdout)
+
+
+    def project(self, files):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        d = git_repo(Path(tmp.name))
+        for name, content in files.items():
+            (d / name).parent.mkdir(parents=True, exist_ok=True)
+            (d / name).write_text(content)
+        return d
+
+    def test_hard_checks_strong_project(self):
+        d = self.project({"eslint.config.js": "export default []", "tsconfig.json": "{}",
+                          "src/a.test.ts": "x", ".github/workflows/ci.yml": "on: push"})
+        out = sh([sys.executable, str(DISCOVER)], d).stdout
+        self.assertIn("### Hard checks", out)
+        self.assertIn("lint: ✓ `eslint.config.js`", out)
+        self.assertIn("types: ✓ `tsconfig.json`", out)
+        self.assertIn("ci: ✓", out)
+        self.assertIn("format: ✗", out)
+        self.assertNotIn("weak hard constraints", out)
+        self.assertIn("constraints: ok", out)
+
+    def test_hard_checks_weak_fixture(self):
+        out = self.snapshot("ui-static")
+        self.assertIn("lint: ✗", out)
+        self.assertIn("weak hard constraints", out)
+        self.assertIn("recommend adding lint, types, tests, ci", out)
+
+    def test_boundaries_detected(self):
+        d = self.project({"eslint.config.js": "rules: {'no-restricted-imports': 1}"})
+        self.assertIn("boundaries: ✓ `eslint.config.js (import rules)`", sh([sys.executable, str(DISCOVER)], d).stdout)
+
+    def test_path_scoped_rules_printed(self):
+        d = self.project({".claude/engineering-team.json": json.dumps({"rules": [
+            {"paths": ["src/api/**"], "rule": "no direct db access", "check": "npm run lint:api"},
+            {"paths": ["web/"], "rule": "use tokens"}]})})
+        out = sh([sys.executable, str(DISCOVER)], d).stdout
+        self.assertIn("### Path-scoped rules", out)
+        self.assertIn("`src/api/**` → no direct db access (check: `npm run lint:api`)", out)
+        self.assertIn("`web/` → use tokens", out)
+
+
+    def test_odd_composer_and_package_scripts_dont_break_snapshot(self):
+        d = self.project({"composer.json": '{"scripts": ["test"]}', "package.json": '{"scripts": ["x"], "dependencies": ["react"]}',
+                          ".claude/engineering-team.json": '{"rules": [{"paths": "a/**", "rule": "keep"}]}'})
+        out = sh([sys.executable, str(DISCOVER)], d).stdout
+        self.assertIn("### Hard checks", out)
+        self.assertIn("### Path-scoped rules", out)
+        self.assertNotIn("discover.py failed", out)
+
+    def test_launcher_skips_broken_python(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bin_dir = Path(tmp.name)
+        (bin_dir / "python3").write_text("#!/bin/sh\necho broken shim >&2\nexit 127\n")
+        (bin_dir / "python3").chmod(0o755)
+        env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
+        r = subprocess.run(["sh", str(ROOT / "scripts" / "etk.sh"), "run", "latest"], cwd=bin_dir,
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = subprocess.run(["sh", str(ROOT / "scripts" / "etk.sh"), "nope"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
 
 
 if __name__ == "__main__":

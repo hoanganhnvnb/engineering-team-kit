@@ -2,7 +2,7 @@
 """Run one end-to-end scenario against a throwaway copy of a fixture.
 
     python3 tests/e2e/run.py <fixture> "<slash command + args>" [--out DIR] [--check "<cmd>"]
-                             [--max-budget-usd N]
+                             [--model M] [--overlay NAME] [--keep] [--bypass]
 
 What it does:
   1. copies tests/fixtures/<fixture> to a temp dir, `git init` + commit (clean baseline)
@@ -31,6 +31,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 FIXTURES = REPO / "tests" / "fixtures"
 ETK_SCRIPT = REPO / "scripts" / "etk_run.py"
+ETK_SH = REPO / "scripts" / "etk.sh"
 ALLOWED_TOOLS = [
     # Narrow, fixed prefixes only: no bare interpreters, no find -exec, no arbitrary npm scripts.
     # This limits accidents. It is NOT an isolation boundary: a test file the agent writes
@@ -39,6 +40,7 @@ ALLOWED_TOOLS = [
     "Bash(npm test)", "Bash(npm test:*)", "Bash(node --test:*)",
     "Bash(python3 -m unittest:*)",
     f"Bash(python3 {ETK_SCRIPT}:*)", f'Bash(python3 "{ETK_SCRIPT}":*)',
+    f'Bash(sh "{ETK_SH}" run:*)', f"Bash(sh {ETK_SH} run:*)",
     "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
     "Bash(git add:*)", "Bash(git commit:*)", "Bash(git worktree:*)", "Bash(git apply:*)",
     "Bash(git rev-parse:*)", "Bash(git ls-files:*)", "Bash(git branch:*)", "Bash(git merge-base:*)",
@@ -143,7 +145,7 @@ def main() -> int:
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     (out / "report.md").write_text(final + "\n\n---\n\n## Ledger render\n\n" + render.stdout)
     print(json.dumps({k: summary[k] for k in ("fixture", "exit_code", "seconds", "cost_usd", "subagents", "skills",
-                                              "diff_stat", "ledger_check", "independent_check")}, indent=2))
+                                              "diff_stat", "untracked", "ledger_check", "independent_check")}, indent=2))
     print(f"\nresults: {out}")
     if not a.keep:
         shutil.rmtree(work.parent, ignore_errors=True)

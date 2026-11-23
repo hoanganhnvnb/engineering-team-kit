@@ -4,6 +4,7 @@
     etk_run.py init "<task>" [--mode small|medium|large] [--kind build|fix|review|test|improve-ui]
     etk_run.py check [RUN_DIR|gates.json]     # exit 1 if the ledger is inconsistent
     etk_run.py render [RUN_DIR|gates.json]    # markdown summary for the final report
+    etk_run.py stats [--json] [--last N]      # aggregate all runs: categories, ratchet candidates, trust
     etk_run.py latest                         # print the newest run dir
 
 The ledger (`.etk/runs/<id>/gates.json`) is the single source of truth for
@@ -15,6 +16,7 @@ Standard library only.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import datetime as dt
 import json
 import re
@@ -54,6 +56,10 @@ AC_MET = {"met", "pass"}
 G3_NA_REASONS = {"docs_only", "no_test_setup"}
 FINDING_FIELDS = ["id", "severity", "location", "evidence", "expected", "actual", "remediation", "status"]
 MIN_EVIDENCE = 12
+COMMAND_TYPES = {"test", "lint", "typecheck", "build", "runtime", "e2e", "static", "other"}
+HARDENING_LAYERS = {"architecture", "static", "runtime", "prose", "none"}
+RUNTIME_TYPES = {"runtime", "e2e"}
+NEEDS_RUNTIME = {"build", "fix", "improve-ui"}
 
 
 def git_root() -> Path:
@@ -145,7 +151,35 @@ def latest_run() -> Path | None:
     return runs[-1] if runs else None
 
 
+def has_runtime_evidence(ledger: dict) -> bool:
+    gates = ledger.get("gates")
+    for gate in gates.values() if isinstance(gates, dict) else []:
+        cmds = gate.get("commands") if isinstance(gate, dict) else None
+        for c in cmds if isinstance(cmds, list) else []:
+            if isinstance(c, dict) and isinstance(c.get("type"), str) and c["type"] in RUNTIME_TYPES:
+                return True
+    return False
+
+
+def runtime_verified(ledger: dict) -> bool:
+    """What the runtime warning accepts: a runtime/e2e command, or a G5 that passed in a browser."""
+    g5 = (ledger.get("gates") or {}).get("G5") if isinstance(ledger.get("gates"), dict) else None
+    return has_runtime_evidence(ledger) or (isinstance(g5, dict) and g5.get("status") == "PASS")
+
+
+def needs_runtime(ledger: dict) -> bool:
+    return isinstance(ledger.get("kind"), str) and ledger["kind"] in NEEDS_RUNTIME \
+        and isinstance(ledger.get("mode"), str) and ledger["mode"] in {"medium", "large"}
+
+
 def validate(ledger: dict) -> tuple[list[str], list[str]]:
+    try:
+        return _validate(ledger)
+    except (TypeError, AttributeError, KeyError, ValueError) as exc:
+        return [f"ledger has a malformed field ({type(exc).__name__}: {exc}); compare it with quality/gates.md"], []
+
+
+def _validate(ledger: dict) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     gates = ledger.get("gates") or {}
@@ -177,6 +211,12 @@ def validate(ledger: dict) -> tuple[list[str], list[str]]:
         if not isinstance(gate, dict):
             errors.append(f"{g}: missing")
             continue
+        if not isinstance(gate.get("commands") or [], list):
+            errors.append(f"{g}: commands must be a list")
+            continue
+        for c in gate.get("commands") or []:
+            if isinstance(c, dict) and "type" in c and (not isinstance(c["type"], str) or c["type"] not in COMMAND_TYPES):
+                errors.append(f"{g}: command `{c.get('cmd')}` type must be one of {sorted(COMMAND_TYPES)}, got {c['type']!r}")
         st = gate.get("status")
         ev = (gate.get("evidence") or "").strip()
         if st not in STATUSES:
@@ -228,12 +268,24 @@ def validate(ledger: dict) -> tuple[list[str], list[str]]:
             errors.append(f"finding {fid}: severity must be one of {SEVERITIES}")
         if f.get("status") not in FINDING_STATUSES:
             errors.append(f"finding {fid}: status must be one of {sorted(FINDING_STATUSES)}")
+        if "category" in f and not isinstance(f["category"], str):
+            errors.append(f"finding {fid}: category must be a string")
+        if "hardening" in f:
+            h = f["hardening"]
+            if not isinstance(h, dict) or not isinstance(h.get("layer"), str) or h["layer"] not in HARDENING_LAYERS:
+                errors.append(f"finding {fid}: hardening.layer must be one of {sorted(HARDENING_LAYERS)}")
+            elif not isinstance(h.get("proposal"), str) or not h["proposal"].strip():
+                errors.append(f"finding {fid}: hardening.proposal must be a non-empty string")
         if f.get("status") in {"disputed", "accepted_risk", "wont_fix"} and not str(f.get("resolution", "")).strip():
             errors.append(f"finding {fid}: status {f.get('status')} needs a 'resolution' explaining why")
 
     cycles, max_cycles = ledger.get("cycles", 0), ledger.get("max_cycles", 3)
     if isinstance(cycles, int) and isinstance(max_cycles, int) and cycles > max_cycles:
         warnings.append(f"{cycles} remediation cycles exceeds max_cycles={max_cycles}; this should have been escalated")
+
+    if outcome == "COMPLETE" and needs_runtime(ledger) and not runtime_verified(ledger):
+        warnings.append("no runtime verification recorded (tests prove code; running it proves the feature) — "
+                        "add a command with type runtime/e2e if the change is user-visible")
 
     if outcome == "COMPLETE":
         for g in GATES:
@@ -307,7 +359,110 @@ def cmd_render(a) -> int:
         for f in sorted(findings, key=lambda f: order.get(f.get("severity"), 9)):
             summary = " ".join(str(f.get("actual", "")).split())[:90].replace("|", "/")
             print(f"| {f.get('id')} | {f.get('severity')} | {f.get('status')} | `{f.get('location')}` | {summary} |")
+    hard = [f for f in findings if isinstance(f.get("hardening"), dict)]
+    if hard:
+        print("\n**Hardening proposals**")
+        for f in hard:
+            print(f"- {f.get('id')} [{f['hardening'].get('layer')}] {f['hardening'].get('proposal')}")
     print(f"\nLedger check: {'OK' if not errors else 'FAILED — ' + '; '.join(errors)}")
+    return 0
+
+
+def clean_run(led: dict) -> dict:
+    """Keep only well-typed fields so one hand-edited ledger can't break the aggregate."""
+    text = lambda v: v if isinstance(v, str) else None
+    findings = led.get("findings") if isinstance(led.get("findings"), list) else []
+    out = {k: text(led.get(k)) for k in ("kind", "mode", "outcome")}
+    out["cycles"] = led.get("cycles") if type(led.get("cycles")) is int else None
+    out["gates"] = led.get("gates") if isinstance(led.get("gates"), dict) else {}
+    out["findings"] = [{"severity": text(f.get("severity")), "category": text(f.get("category")),
+                        "hardening": f.get("hardening") if isinstance(f.get("hardening"), dict) else None}
+                       for f in findings if isinstance(f, dict)]
+    return out
+
+
+def cmd_stats(a) -> int:
+    d = runs_dir()
+    paths = sorted(d.glob("*/gates.json")) if d.exists() else []
+    if a.last is not None:
+        if a.last < 1:
+            print("--last must be >= 1", file=sys.stderr)
+            return 2
+        paths = paths[-a.last:]
+    runs, warns = [], []
+    for p in paths:
+        try:
+            led = json.loads(p.read_text())
+            if not isinstance(led, dict):
+                raise ValueError("not an object")
+            runs.append(clean_run(led))
+        except (OSError, ValueError, TypeError, AttributeError) as e:
+            warns.append(f"skipped {p.parent.name}: {e}")
+    cnt = lambda key: dict(Counter(str(r.get(key)) for r in runs))
+    cycles = [r["cycles"] for r in runs if type(r.get("cycles")) is int]
+    per_run = [[f for f in (r.get("findings") or []) if isinstance(f, dict)] for r in runs]
+    sev = Counter(f.get("severity") for fs in per_run for f in fs)
+    cats: dict = {}
+    for i, fs in enumerate(per_run):
+        for f in fs:
+            c = f.get("category")
+            if not isinstance(c, str) or not c.strip():
+                continue
+            e = cats.setdefault(c, {"findings": 0, "runs": set(), "sev": set(), "proposals": []})
+            e["findings"] += 1
+            e["runs"].add(i)
+            e["sev"].add(f.get("severity"))
+            h = f.get("hardening")
+            if isinstance(h, dict) and h.get("proposal"):
+                pr = f"[{h.get('layer')}] {h['proposal']}"
+                if pr not in e["proposals"]:
+                    e["proposals"].append(pr)
+    ranked = sorted(cats.items(), key=lambda kv: (-kv[1]["findings"], kv[0]))
+    top = [{"category": c, "findings": e["findings"], "runs": len(e["runs"])} for c, e in ranked[:8]]
+    ratchet = [{"category": c, "runs": len(e["runs"]), "proposals": e["proposals"]} for c, e in ranked
+               if len(e["runs"]) >= 2 and e["sev"] & {"medium", "high", "critical"}]
+    n = len(runs)
+    avg = lambda xs: round(sum(xs) / len(xs), 2) if xs else None
+    half = n // 2
+    old, new = avg([len(x) for x in per_run[:half]]), avg([len(x) for x in per_run[half:]])
+    trend = "n/a" if old is None or new is None else "down" if new < old - 0.25 else "up" if new > old + 0.25 else "flat"
+    bf = [r for r in runs if needs_runtime(r)]
+    out = {
+        "runs": n, "by_kind": cnt("kind"), "by_mode": cnt("mode"), "by_outcome": cnt("outcome"),
+        "avg_cycles": avg(cycles),
+        "findings_by_severity": {s: sev[s] for s in SEVERITIES if sev[s]},
+        "top_categories": top, "ratchet_candidates": ratchet,
+        "trust": {
+            "complete_share": round(sum(r.get("outcome") == "COMPLETE" for r in runs) / n, 2) if n else None,
+            "blocking_per_run": avg([sum(f.get("severity") in BLOCKING for f in fs) for fs in per_run]),
+            "findings_per_run_older": old, "findings_per_run_newer": new, "trend": trend,
+            "runtime_verified_share": round(sum(map(runtime_verified, bf)) / len(bf), 2) if bf else None,
+        },
+        "warnings": warns,
+    }
+    if a.json:
+        print(json.dumps(out, indent=2))
+        return 0
+    for w in warns:
+        print(f"warning: {w}", file=sys.stderr)
+    fmt = lambda m: ", ".join(f"{k} {v}" for k, v in m.items()) or "—"
+    t = out["trust"]
+    pct = lambda x: "n/a" if x is None else f"{round(x * 100)}%"
+    print(f"## ETK stats ({n} run(s))\n")
+    if not n:
+        return 0
+    print(f"- kind: {fmt(out['by_kind'])}\n- mode: {fmt(out['by_mode'])}\n- outcome: {fmt(out['by_outcome'])}\n"
+          f"- avg cycles: {out['avg_cycles']}\n- findings by severity: {fmt(out['findings_by_severity'])}")
+    print("\n**Top categories** (findings / runs)")
+    print("\n".join(f"- {c['category']}: {c['findings']} / {c['runs']}" for c in top) or "- none")
+    print("\n**Ratchet candidates** (>=2 runs, severity >= medium)")
+    for r in ratchet:
+        print(f"- {r['category']} ({r['runs']} runs)" + "".join(f"\n  - proposal: {p}" for p in r["proposals"]))
+    if not ratchet:
+        print("- none")
+    print(f"\n**Trust indicators**\n- complete: {pct(t['complete_share'])}\n- blocking findings/run: {t['blocking_per_run']}\n"
+          f"- findings/run older half {t['findings_per_run_older']} -> newer half {t['findings_per_run_newer']}: {t['trend']}\n"
+          f"- medium/large build/fix/improve-ui runs verified by running: {pct(t['runtime_verified_share'])}")
     return 0
 
 
@@ -324,6 +479,10 @@ def main() -> int:
         s = sub.add_parser(name)
         s.add_argument("path", nargs="?")
         s.set_defaults(fn=fn)
+    st = sub.add_parser("stats")
+    st.add_argument("--json", action="store_true")
+    st.add_argument("--last", type=int, default=None, metavar="N")
+    st.set_defaults(fn=cmd_stats)
     l = sub.add_parser("latest")
     l.set_defaults(fn=lambda a: print(latest_run() or "") or 0)
     a = ap.parse_args()

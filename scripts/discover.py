@@ -2,7 +2,7 @@
 """Print a compact snapshot of the current project for the Lead agent.
 
 Read-only. Standard library only. Meant to be injected into a skill with
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover.py"` so the Lead starts from
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover` so the Lead starts from
 facts instead of guesses. Output is markdown, kept short on purpose: it lists
 *where* things are, the agent reads what it actually needs.
 """
@@ -100,6 +100,74 @@ def section(title: str, lines: list[str]) -> None:
         print(f"- … {len(lines) - MAX_LIST} more")
 
 
+def hard_checks(root: Path, names: set[str], pkg, ci: list[str]) -> list[str]:
+    """Which automatic constraints exist, with the file that proves each. Root + one level only."""
+    top = sorted(n for n in names if n.count("/") <= 1)
+
+    def find(pattern: str) -> list[str]:
+        return [n for n in top if re.search(pattern, n.rsplit("/", 1)[-1])]
+
+    def text(n: str) -> str:
+        try:
+            return (root / n).read_text(encoding="utf-8", errors="replace")[:200_000]
+        except OSError:
+            return ""
+
+    def has(n: str, marker: str) -> list[str]:
+        return [n] if n in names and marker in text(n) else []
+
+    pkg = pkg if isinstance(pkg, dict) else {}
+    pyproj = "pyproject.toml"
+    eslint = find(r"^(eslint\.config\.|\.eslintrc)") + (["package.json (eslintConfig)"] if "eslintConfig" in pkg else [])
+    ruff = find(r"^\.?ruff\.toml$") + has(pyproj, "[tool.ruff")
+    golangci = find(r"^\.golangci\.")
+    lint = (eslint + find(r"^biome\.jsonc?$") + ruff + find(r"^\.flake8$") + has("setup.cfg", "[flake8]")
+            + has("tox.ini", "[flake8]") + golangci + find(r"^phpstan(\.dist)?\.neon") + find(r"^psalm\.xml$")
+            + find(r"^\.rubocop\.yml$") + find(r"^\.theme-check\.yml$")
+            + find(r"^(\.stylelintrc|stylelint\.config\.)") + (["package.json (stylelint)"] if "stylelint" in pkg else []))
+    compiled = [f"{n} (compiler)" for n in ("go.mod", "Cargo.toml") if n in names]
+    types = (find(r"^tsconfig.*\.json$") + find(r"^mypy\.ini$") + has(pyproj, "[tool.mypy") + has("setup.cfg", "[mypy]")
+             + find(r"^pyrightconfig\.json$") + has(pyproj, "[tool.pyright") + compiled)
+    fmt = (find(r"^(\.prettierrc|prettier\.config\.)") + (["package.json (prettier)"] if "prettier" in pkg else [])
+           + has(pyproj, "[tool.black") + [f"{r} (ruff format)" for r in ruff[:1]]
+           + [f"{n} (gofmt)" for n in ("go.mod",) if n in names] + [f"{n} (rustfmt)" for n in ("Cargo.toml",) if n in names])
+    # tests: a test dir/file anywhere in the walked list, or a declared test script
+    tests = [n for n in sorted(names) if re.search(r"(^|/)(tests?|__tests__|spec)/", n)
+             or re.search(r"(_test\.go|\.(test|spec)\.[a-z]+|(^|/)test_[^/]*\.py)$", n)][:1]
+    scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
+    script = str(scripts.get("test", ""))
+    if script and "no test specified" not in script:
+        tests.append("package.json (scripts.test)")
+    comp = read_json(root / "composer.json")
+    if isinstance(comp, dict) and isinstance(comp.get("scripts"), dict) and comp["scripts"].get("test"):
+        tests.append("composer.json (scripts.test)")
+    if "Makefile" in names and re.search(r"^test[a-zA-Z0-9_-]*:", text("Makefile"), re.M):
+        tests.append("Makefile (test target)")
+    hooks = (find(r"^\.pre-commit-config\.yaml$") + [n for n in top if n.startswith(".husky/")][:1]
+             + find(r"^lefthook\.ya?ml$") + find(r"^\.lintstagedrc") + (["package.json (lint-staged)"] if "lint-staged" in pkg else []))
+    bounds = find(r"^\.dependency-cruiser\.") + find(r"^\.importlinter$") + has("setup.cfg", "[importlinter]") + has(pyproj, "[tool.importlinter")
+    for n in top:
+        if re.search(r"^(eslint\.config\.|\.eslintrc)", n.rsplit("/", 1)[-1]) and re.search(
+                r"no-restricted-imports|import/no-restricted-paths|boundaries/", text(n)):
+            bounds.append(f"{n} (import rules)")
+    bounds += [f"{n} (depguard)" for n in golangci if "depguard" in text(n)]
+
+    cats = [("lint", lint), ("types", types), ("format", fmt), ("tests", tests), ("ci", ci),
+            ("pre-commit", hooks), ("boundaries", bounds)]
+    lines = []
+    for label, proof in cats:
+        proof = list(dict.fromkeys(proof))
+        lines.append(f"{label}: ✓ " + ", ".join(f"`{x}`" for x in proof[:3]) if proof else f"{label}: ✗")
+    have = {label: bool(proof) for label, proof in cats}
+    if (not have["lint"] and not have["types"]) or not have["tests"] or not have["ci"]:
+        missing = [l for l in ("lint", "types", "tests", "ci") if not have[l]]
+        lines.append("⚠ weak hard constraints: agents copy whatever patterns exist; recommend adding "
+                     f"{', '.join(missing)} before large features")
+    else:
+        lines.append("constraints: ok")
+    return lines
+
+
 def main() -> int:
     root = find_root(Path.cwd())
     print(f"## Project snapshot\n\n- root: `{root}`")
@@ -166,12 +234,13 @@ def main() -> int:
         for lock, name in (("pnpm-lock.yaml", "pnpm"), ("yarn.lock", "yarn"), ("bun.lockb", "bun"), ("bun.lock", "bun")):
             if (root / lock).exists():
                 pm = name
-        deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+        deps = {k: v for key in ("dependencies", "devDependencies")
+                if isinstance(pkg.get(key), dict) for k, v in pkg[key].items()}
         known = [d for d in ("next", "react", "vue", "nuxt", "svelte", "@remix-run/react", "@shopify/polaris",
                              "@shopify/shopify-app-remix", "@shopify/hydrogen", "express", "vitest", "jest",
                              "@playwright/test", "cypress", "typescript", "eslint") if d in deps]
         stack.append(f"node ({pm})" + (f": {', '.join(known)}" if known else ""))
-        for k, v in (pkg.get("scripts") or {}).items():
+        for k, v in (pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}).items():
             if re.search(r"test|lint|type|check|build|e2e|format", k):
                 cmds.append(f"`{pm} run {k}` → {short(str(v), 70)}")
     if (root / "pyproject.toml").exists() or (root / "requirements.txt").exists() or (root / "setup.py").exists():
@@ -195,7 +264,7 @@ def main() -> int:
                 cmds.append(cmd)
     comp = read_json(root / "composer.json")
     if isinstance(comp, dict):
-        for k in (comp.get("scripts") or {}):
+        for k in (comp.get("scripts") if isinstance(comp.get("scripts"), dict) else {}):
             if re.search(r"test|lint|stan|check", k):
                 cmds.append(f"`composer {k}`")
     if (root / "Makefile").exists():
@@ -211,7 +280,8 @@ def main() -> int:
         shopify.append("Shopify theme (Liquid)")
     if any(n.startswith("extensions/") and n.endswith("shopify.extension.toml") for n in names):
         shopify.append("Shopify extensions")
-    if isinstance(pkg, dict) and any(k.startswith("@shopify/") for k in {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}):
+    if isinstance(pkg, dict) and any(str(k).startswith("@shopify/") for key in ("dependencies", "devDependencies")
+                                       if isinstance(pkg.get(key), dict) for k in pkg[key]):
         shopify.append("@shopify/* packages")
 
     ui = any(re.search(r"\.(tsx|jsx|vue|svelte|liquid|html|css|scss)$", n) for n in names)
@@ -223,11 +293,25 @@ def main() -> int:
     ci = sorted(r for r in names if r.startswith(".github/workflows/") or r in {".gitlab-ci.yml", "bitbucket-pipelines.yml", ".circleci/config.yml"})
     section("CI config (shows the real gate commands)", [f"`{c}`" for c in ci])
 
+    try:
+        checks = hard_checks(root, names, pkg, ci)
+    except Exception as exc:  # one odd config file shouldn't cost the rest of the snapshot
+        checks = [f"(couldn't read: {exc})"]
+    section("Hard checks (what the project enforces automatically)", checks)
+
     cfg_path = root / ".claude" / "engineering-team.json"
     cfg = read_json(cfg_path)
     if cfg is not None:
         print("\n### ETK project config (`.claude/engineering-team.json`)")
         print("```json\n" + json.dumps(cfg, indent=2)[:1500] + "\n```")
+        rules = cfg.get("rules") if isinstance(cfg, dict) else None
+        rl = []
+        for r in rules if isinstance(rules, list) else []:
+            if isinstance(r, dict) and r.get("rule"):
+                paths = r.get("paths")
+                paths = ", ".join(map(str, paths)) if isinstance(paths, list) else str(paths or "*")
+                rl.append(f"`{paths}` → {short(str(r['rule']), 160)}" + (f" (check: `{r['check']}`)" if r.get("check") else ""))
+        section("Path-scoped rules", rl)
 
     runs = sorted((root / ".etk" / "runs").glob("*/gates.json")) if (root / ".etk" / "runs").exists() else []
     if runs:

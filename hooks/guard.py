@@ -19,7 +19,8 @@ Blocks (exit 2, reason on stderr so the agent can adapt):
   - history rewrites: rebase, commit --amend, filter-branch
   - recursive rm outside the project
   - secret files: staging, writing, or redirecting into .env / keys
-  - read-only roles (code-reviewer, ux-reviewer) changing files via the shell;
+  - read-only roles (code-reviewer, ux-reviewer, scout) changing files at all, and the
+    tech-writer writing anything but Markdown (or writing through the shell);
     qa-engineer changing existing files (it may only create new ones)
 
 This is a seatbelt, not a sandbox: it stops the accidents agents actually make.
@@ -35,7 +36,25 @@ import sys
 import tempfile
 
 PREFIX = "engineering-team:"
-READ_ONLY_ROLES = {"code-reviewer", "ux-reviewer"}
+READ_ONLY_ROLES = {"code-reviewer", "ux-reviewer", "scout"}
+# Writes files only through Write/Edit, and only Markdown. No shell writes either.
+DOCS_ONLY_ROLES = {"tech-writer"}
+# Markdown that steers agents is config, not docs: the tech-writer doesn't touch it.
+INSTRUCTION_MD = re.compile(r"(^|/)(CLAUDE(\.local)?|AGENTS|SKILL)\.md$|(^|/)\.claude/|(^|/)\.github/copilot-instructions\.md$", re.I)
+# Interpreters running inline code, and markers of that code writing files.
+INLINE_CODE = re.compile(r"^(python[\d.]*|pypy[\d.]*|node(js)?|ruby[\d.]*|perl[\d.]*|php[\d.]*|deno|bun|osascript)$")
+WRITE_CODE = re.compile(
+    r"writeFile|appendFile|writeSync|createWriteStream|copyFile|rmSync|unlinkSync|renameSync|"
+    r"\.write_(text|bytes)\(|open\([^)]*,\s*(mode\s*=\s*)?['\"](r\+|[wax])|"
+    r"os\.(remove|unlink|rename|replace|system|popen)|shutil\.|subprocess|child_process|"
+    r"file_put_contents|File\.write|open\s*\(?\s*\w+\s*,\s*['\"]\s*\+?>|print\s*>\s*['\"]", re.I)
+# Flags that make an interpreter run code given on the command line, or read it from stdin.
+INLINE_FLAG = re.compile(r"^(-[a-zA-Z]*[ceEpr]|--eval|--print|-)$")
+# perl/ruby -i (in place): `-i`, `-i.bak`, `-pi`, `-pie`; not `-Ilib`, `-Mstrict`, `-mstrict`.
+PERL_INPLACE = re.compile(r"^-[pnlawsTtWXU0-9]*i")  # only switches that take no argument may precede i
+FORMATTER_WRITE = {("prettier", "-w"), ("gofmt", "-w"), ("rubocop", "-a"), ("rubocop", "-A"), ("standardrb", "--fix"),
+                   ("sed", "--in-place"), ("black", None), ("ruff", "format"), ("isort", None), ("rustfmt", None),
+                   ("clang-format", "-i"), ("php-cs-fixer", "fix")}
 
 SECRET_NAME = re.compile(
     r"(^|/)(\.env(\.[\w-]+)?|id_rsa|id_ed25519|[^/]*\.pem|[^/]*\.p12|[^/]*\.key|credentials\.json"
@@ -104,7 +123,9 @@ def program(words: list[str]) -> list[str]:
     i = 0
     while i < len(words):
         w = words[i]
-        if re.match(r"^\w+=", w) or w in WRAPPERS or (i > 0 and words[i - 1] in {"env", "sudo"} and w.startswith("-")):
+        base = os.path.basename(w)
+        if re.match(r"^\w+=", w) or base in WRAPPERS or (i > 0 and os.path.basename(words[i - 1]) in {"env", "sudo"}
+                                                         and w.startswith("-")):
             i += 1
             continue
         break
@@ -263,13 +284,38 @@ def writes_existing(target: str, cwd: str) -> bool:
     return os.path.exists(path) and not scratch(path, cwd)
 
 
+def real_tool(words: list[str]) -> list[str]:
+    """See through package-runner wrappers: `npx prettier -w` is prettier."""
+    prog = os.path.basename(words[0]) if words else ""
+    rest = words[1:]
+    if prog in {"pnpm", "yarn", "npm"} and rest and rest[0] in {"exec", "dlx", "x"}:
+        rest = rest[1:]
+    elif prog not in {"npx", "bunx", "pnpx"}:
+        return words
+    while rest and rest[0].startswith("-"):
+        rest = rest[1:]
+    return rest or words
+
+
+def runs_inline_code(words: list[str]) -> bool:
+    """An interpreter given code inline (-c/-e/--eval) or on stdin (`-`, or no arguments at all)."""
+    if not words or not INLINE_CODE.match(os.path.basename(words[0])):
+        return False
+    args = words[1:]
+    if args and all(a in {"--version", "-v", "-V", "--help", "-h"} for a in args):
+        return False
+    return not args or any(INLINE_FLAG.match(a) for a in args)
+
+
 def check_bash(cmd: str, cwd: str, role: str, depth: int = 0) -> None:
     if depth > MAX_DEPTH:
         raise Blocked("command nests shells too deeply to check")
     for inner in substitutions(cmd):
         check_bash(inner, cwd, role, depth + 1)
-    read_only = role in READ_ONLY_ROLES
+    read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
     create_only = role == "qa-engineer"
+    if read_only and WRITE_CODE.search(cmd) and any(runs_inline_code(program(seg)) for seg in segments(cmd)):
+        raise Blocked(f"{role} is read-only; inline code that writes files isn't allowed")
     for seg in segments(cmd):
         words = program(seg)
         if not words:
@@ -304,9 +350,18 @@ def check_bash(cmd: str, cwd: str, role: str, depth: int = 0) -> None:
                     or (prog == "sed" and any(w.startswith("-i") for w in words[1:])):
                 raise Blocked("qa-engineer may only create new files, not change existing ones")
         if read_only:
+            words = real_tool(words)
+            prog = os.path.basename(words[0])
             ops = write_operands(prog, words[1:])
             writes = prog in SHELL_WRITERS and not (ops and all(scratch(t, cwd) for t in ops))
-            if writes or (prog == "sed" and any(w.startswith("-i") for w in words[1:])) \
+            rest = [w for w in words[1:] if not w.startswith("-") and w not in {"exec", "dlx", "run"}]
+            tool = os.path.basename(rest[0]) if prog in {"npx", "pnpx", "bunx", "pnpm", "yarn", "uvx", "pipx"} and rest else prog
+            inplace = (prog == "sed" and any(w.startswith("-i") or w.startswith("--in-place") for w in words[1:])) \
+                or (re.match(r"^(perl|ruby)[\d.]*$", prog) and any(PERL_INPLACE.match(w) for w in words[1:])) \
+                or any(w in {"--write", "--fix"} or w.startswith(("--write=", "--fix=")) for w in words[1:]) \
+                or (any(tool == name and (flag is None or flag in words[1:]) for name, flag in FORMATTER_WRITE)
+                    and not any(w in {"--check", "--diff", "--check-only", "-l", "--list-different"} for w in words[1:]))
+            if writes or inplace \
                     or (prog == "git" and any(w in {"add", "commit", "apply", "mv", "rm", "checkout", "restore"} for w in words[1:3])):
                 raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
 
@@ -330,6 +385,12 @@ def main() -> int:
             path = str(inp.get("file_path") or inp.get("notebook_path") or "")
             if is_secret(path):
                 raise Blocked(f"writing `{path}` (looks like a secrets file); edit the .example version instead")
+            if role in DOCS_ONLY_ROLES and not path.lower().endswith((".md", ".mdx")):
+                raise Blocked(f"{role} writes Markdown only; `{path}` is not a .md file")
+            if role in DOCS_ONLY_ROLES and INSTRUCTION_MD.search(os.path.relpath(os.path.join(cwd, path), cwd).replace(os.sep, "/")):
+                raise Blocked(f"{role} doesn't edit agent instructions or config (`{path}`); ask the Lead")
+            if role in READ_ONLY_ROLES:
+                raise Blocked(f"{role} is read-only")
             if role == "qa-engineer" and (tool != "Write" or os.path.exists(path)):
                 raise Blocked("qa-engineer may only create new test files, not change existing ones")
     except Blocked as b:

@@ -6,8 +6,8 @@ case "$input" in
   *'"agent_type"'*'engineering-team:'*) ;;
   *) exit 0 ;;
 esac
-for py in python3 python; do
-  if command -v "$py" >/dev/null 2>&1; then
+for py in python3 /usr/bin/python3 /usr/local/bin/python3 python; do
+  if "$py" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
     printf '%s' "$input" | "$py" "$(dirname "$0")/guard.py"
     exit $?
   fi
