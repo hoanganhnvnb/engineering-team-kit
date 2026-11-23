@@ -3,7 +3,7 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
-## Unreleased
+## 0.2.1
 
 - `evals/run.sh`: run the evals on a temporary copy so a harness sandbox problem with
   `!` injection doesn't end every run at turn 0. Eval results recorded in `docs/validation.md`.
