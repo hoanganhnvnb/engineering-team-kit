@@ -1,0 +1,28 @@
+{
+  "$comment": "Optional. Copy to <project>/.claude/engineering-team.json and delete what you don't need. Every key is optional.",
+  "commands": {
+    "test": "npm test",
+    "lint": "npm run lint",
+    "typecheck": "npm run typecheck",
+    "e2e": "npx playwright test",
+    "build": "npm run build"
+  },
+  "ui": {
+    "start": "npm run dev",
+    "url": "http://localhost:3000"
+  },
+  "max_cycles": 3,
+  "commit": false,
+  "invariants": [
+    "Order totals are computed server-side only",
+    "Public API responses stay backward compatible"
+  ],
+  "protected_paths": [
+    "migrations/",
+    "src/billing/"
+  ],
+  "agents": {
+    "code-reviewer": "my-project-reviewer"
+  },
+  "notes": "Anything else the team should know, in one or two lines."
+}
