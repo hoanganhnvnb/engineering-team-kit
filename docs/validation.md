@@ -97,12 +97,19 @@ What B′ showed about the 0.2.0 changes:
 
 ### Evals
 
-`claude plugin eval` loads and grades all three cases. Inside a nested Claude Code session
-the eval sandbox couldn't start (`Failed to create bridge sockets`, read-only temp dir),
-so the agent runs stopped at turn 0 and the scores aren't meaningful. Run them from a plain
-terminal. The attempt still found two real problems: a broken `python3` shim on PATH made
-the snapshot fail (fixed with the `etk.sh` launcher) and one grader used a key the schema
-doesn't allow.
+Run through `evals/run.sh` (see [evals/README.md](../evals/README.md) for why it uses a
+patched copy), one run per case, judge on sonnet:
+
+| Case | Score | Turns / cost | Notes |
+|---|---|---|---|
+| `small-fix-stays-small` | 5/5, then 4/5 on a repeat | 10–11 / $0.23–0.27 | Root cause named with `file:line`, reproduction test first, no subagents. The repeat failed only "ledger checked": its sandbox wouldn't let it create `.etk/`, and the agent said so and filled the gates by hand |
+| `ui-without-browser-is-honest` | 2/2 | 9 / $1.11 | Viewport meta added; reported G5 BLOCKED and "nothing was checked in a browser" |
+| `security-change-gets-independent-review` | 3/3 | 13 / $0.45 | Independent reviewer spawned; bound parameters; LIKE wildcards escaped |
+
+Running the suite directly against the real skills gives turn-0 failures with meaningless
+scores (see limitations). Getting there found three real problems: a broken `python3` shim
+on PATH made the snapshot fail (fixed with the `etk.sh` launcher), one grader used a key the
+schema doesn't allow, and two graders could pass without the agent doing anything.
 
 ## Problems the runs found in the plugin (and fixes)
 

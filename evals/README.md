@@ -5,8 +5,24 @@ runner. They're unit tests for the skills: when you change a skill or agent prom
 run them and see whether behavior moved.
 
 ```bash
-claude plugin eval . --scaffold --allow-tools Bash Write Edit --ablation none --judge-model sonnet -j 3 --no-publish
+evals/run.sh                      # all cases
+evals/run.sh --case 'small-*'     # extra flags go to `claude plugin eval`
 ```
+
+`run.sh` makes a temporary copy of the plugin and runs `claude plugin eval` on it with
+`--scaffold --allow-tools Bash Write Edit --ablation none --judge-model sonnet --no-publish`
+and a $12 cost cap. Results go to `evals/results/<timestamp>/` (git-ignored): `result.json`
+and `report.html`.
+
+**Why a copy.** The eval sandbox's temp dir is read-only for the harness's own shell
+wrapper, so a skill's `` !`…` `` snapshot line counts as failed and every run ends at turn 0
+with a score that looks like a result but isn't. In the copy that one line becomes "run this
+with the Bash tool". Agents, hooks, scripts, workflows and graders are the real ones, and the
+skills in the repo aren't touched. This was checked against the real skills first: they
+reproduce the turn-0 failure, and the copy runs to completion.
+
+
+Flags `run.sh` sets, and why:
 
 - `--scaffold` runs each case's `scaffold.sh` to build a tiny throwaway project.
 - `--allow-tools`: Bash/Write/Edit are gated in eval runs; the cases need them.
@@ -23,10 +39,10 @@ claude plugin eval . --scaffold --allow-tools Bash Write Edit --ablation none --
 | `ui-without-browser-is-honest` | No visual claims without a browser; G5 BLOCKED, not PASS |
 | `security-change-gets-independent-review` | SQL + user input → independent reviewer; no string-built SQL; LIKE wildcards handled |
 
-Run them from a normal terminal, not from inside a Claude Code session: the eval
-runner starts its own OS sandbox, and nested inside another session it can fail to start
-(we saw `Failed to create bridge sockets` and a read-only temp dir, which make the
-snapshot step fail at turn 0). Results go to `evals/results/` (git-ignored).
+A run is one sample from a model, so a single failed grader isn't automatically a bug: in
+one check the agent honestly reported that its sandbox wouldn't let it create `.etk/`, so the
+"ledger checked" grader failed while the behaviour was right. Read the report before
+changing a skill. Use `--runs 3` for anything you rely on.
 
 Add a case when a real run goes wrong: reproduce the situation in `scaffold.sh`,
 then write graders for the behavior you wanted. Prefer deterministic graders

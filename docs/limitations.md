@@ -36,10 +36,12 @@ Honest list. If one of these bites you, an issue is welcome.
   metric to optimise.
 - **Hardening proposals aren't applied automatically.** A new lint rule or CI step is a
   project change. The team proposes; you decide.
-- **Evals need a working sandbox.** `claude plugin eval` starts its own OS sandbox. Run
-  from inside another Claude Code session, it failed to start here (`Failed to create
-  bridge sockets`, read-only temp dir), so every case stopped at turn 0. Run evals from a
-  plain terminal or CI. The e2e runner (`tests/e2e/run.py`) doesn't have this problem.
+- **Evals run on a patched copy.** In Claude Code 2.1.329 the eval sandbox makes the
+  harness's own shell wrapper fail (`read-only file system: …/tmp/claude-<uid>/cwd-…`), which
+  aborts any skill that has a `` !`…` `` injection line, from a plain terminal as well. Nothing
+  in the docs mentions it. `evals/run.sh` works around it by evaluating a temporary copy where
+  that line is a Bash instruction, so the evals don't exercise the injection itself; the e2e
+  runner (`tests/e2e/run.py`) does. Worth reporting upstream (`/feedback`).
 - **Evals cost money and are noisy.** Each case is a real model run plus an LLM judge
   (roughly $0.5–3 per case). Run them when you change a skill or agent, not on every
   commit. One run is a sample, not proof: use `--runs` for anything you rely on.

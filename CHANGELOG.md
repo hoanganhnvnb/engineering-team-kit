@@ -3,6 +3,11 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
+## Unreleased
+
+- `evals/run.sh`: run the evals on a temporary copy so a harness sandbox problem with
+  `!` injection doesn't end every run at turn 0. Eval results recorded in `docs/validation.md`.
+
 ## 0.2.0
 
 - New agents: `scout` (haiku; fact gathering and data export) and `tech-writer` (opus;
