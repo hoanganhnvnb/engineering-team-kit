@@ -12,8 +12,10 @@ What it does:
      the transcript
   4. writes transcript.jsonl + summary.json to --out
 
-This spends real model tokens. It never touches anything outside the temp dir
-(and the guard hook stays active for the plugin's agents).
+This spends real model tokens. By default it runs with acceptEdits and a short
+shell allowlist (ALLOWED_TOOLS); commands outside it are denied, which can make a
+scenario fail rather than run something unexpected. --bypass removes that limit and
+should only be used in a disposable VM or container.
 """
 from __future__ import annotations
 
@@ -28,6 +30,15 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURES = REPO / "tests" / "fixtures"
+ALLOWED_TOOLS = [
+    "Read", "Edit", "Write", "Glob", "Grep", "Agent", "Skill",
+    "Bash(npm test:*)", "Bash(npm run:*)", "Bash(node --test:*)", "Bash(node:*)",
+    "Bash(python3:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+    "Bash(git add:*)", "Bash(git commit:*)", "Bash(git worktree:*)", "Bash(git apply:*)",
+    "Bash(git rev-parse:*)", "Bash(git ls-files:*)", "Bash(git branch:*)", "Bash(git merge-base:*)",
+    "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(grep:*)", "Bash(find:*)",
+    "Bash(mkdir:*)", "Bash(curl -s http://localhost:*)", "Bash(shopify theme check:*)",
+]
 
 
 def sh(cmd, cwd, timeout=600, shell=False):
@@ -43,6 +54,9 @@ def main() -> int:
     ap.add_argument("--timeout", type=int, default=1800)
     ap.add_argument("--model", default=None)
     ap.add_argument("--keep", action="store_true", help="keep the temp project dir")
+    ap.add_argument("--bypass", action="store_true",
+                    help="run with --permission-mode bypassPermissions. The agent can then run ANY command "
+                         "as you, not only inside the temp dir. Use only in a disposable VM/container.")
     a = ap.parse_args()
 
     src = FIXTURES / a.fixture
@@ -57,8 +71,13 @@ def main() -> int:
     sh(["git", "add", "-A"], work)
     sh(["git", "-c", "user.email=e2e@example.com", "-c", "user.name=e2e", "commit", "-q", "-m", "fixture baseline"], work)
 
-    cmd = ["claude", "-p", a.prompt, "--plugin-dir", str(REPO), "--output-format", "stream-json", "--verbose",
-           "--permission-mode", "bypassPermissions"]
+    cmd = ["claude", "-p", a.prompt, "--plugin-dir", str(REPO), "--output-format", "stream-json", "--verbose"]
+    if a.bypass:
+        print("warning: --bypass gives the agent unrestricted shell access as your user", file=sys.stderr)
+        cmd += ["--permission-mode", "bypassPermissions"]
+    else:
+        # File edits are auto-accepted; shell access is limited to what the scenarios need.
+        cmd += ["--permission-mode", "acceptEdits", "--allowedTools", *ALLOWED_TOOLS]
     if a.model:
         cmd += ["--model", a.model]
     started = time.time()
