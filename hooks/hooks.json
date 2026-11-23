@@ -1,0 +1,17 @@
+{
+  "description": "Seatbelt for engineering-team subagents: blocks push/deploy/destructive git and secret files. No effect on the main session or other plugins.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
