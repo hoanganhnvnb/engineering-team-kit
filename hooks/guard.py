@@ -366,14 +366,11 @@ def check_bash(cmd: str, cwd: str, role: str, depth: int = 0) -> None:
                 raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
 
 
-def main() -> int:
-    try:
-        data = json.load(sys.stdin)
-    except ValueError:
-        return 0
+def decide(data: dict) -> str | None:
+    """Reason to block this tool call, or None to allow it."""
     agent = str(data.get("agent_type") or "")
     if not agent.startswith(PREFIX):
-        return 0
+        return None
     role = agent[len(PREFIX):]
     tool = data.get("tool_name")
     inp = data.get("tool_input") or {}
@@ -394,7 +391,18 @@ def main() -> int:
             if role == "qa-engineer" and (tool != "Write" or os.path.exists(path)):
                 raise Blocked("qa-engineer may only create new test files, not change existing ones")
     except Blocked as b:
-        print(f"[engineering-team guard] blocked: {b}. If this is really needed, stop and report it "
+        return str(b)
+    return None
+
+
+def main() -> int:
+    try:
+        data = json.load(sys.stdin)
+    except ValueError:
+        return 0
+    reason = decide(data)
+    if reason is not None:
+        print(f"[engineering-team guard] blocked: {reason}. If this is really needed, stop and report it "
               f"to the Lead so the user can decide.", file=sys.stderr)
         return 2
     return 0
