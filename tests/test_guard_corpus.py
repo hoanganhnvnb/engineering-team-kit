@@ -117,7 +117,86 @@ R1_1_CD = (
      ("scout", "cd /tmp && echo x > z", "allow")]
 )
 
-CASES = BENIGN + BASELINE_BLOCKS + R1_1_CD
+# R1-2: compound syntax, wrappers, find, and shells fed from stdin.
+R1_2_COMPOUND = (
+    [("dev", c, "block") for c in [
+        "if true; then git push; fi",
+        "if git push; then echo ok; fi",
+        "for f in a b; do git push; done",
+        "while true; do git push; done",
+        "until false; do git push; done",
+        "{ git push; }",
+        "! git push",
+        "if true; then echo a; else git push; fi",
+        "if false; then echo a; elif true; then git push; fi",
+        "timeout 5 git push",
+        "timeout -s KILL 5 git push",
+        "nice git push",
+        "nice -n 5 git push",
+        "ionice -c 3 git push",
+        "stdbuf -oL git push",
+        "caffeinate git push",
+        "caffeinate -i git push",
+        "setsid git push",
+        "sudo -u root git push",
+        "env -i FOO=1 git push",
+        "find .. -delete",
+        "find / -exec rm -rf {} +",
+        "find ../x -exec rm -rf {} \\;",
+        "find . -name x -execdir git push \\;",
+        "find . -name x -ok git push \\;",
+        "bash -c -- 'git push'",
+        "bash -x -c 'git push'",
+        "echo 'git push' | sh",
+        "echo 'git push' | bash -s",
+        "cat script.sh | sh",
+        "bash <<< 'git push'",
+        "bash",
+        "sh <<EOF\ngit push\nEOF",
+    ]]
+    + [("rev", c, "block") for c in [
+        "if true; then echo x > src/a.js; fi",
+        "for f in a; do rm src/a.js; done",
+        "timeout 5 sed -i s/a/b/ src/a.js",
+        "nice -n 5 tee src/a.js",
+        "find src -name '*.js' -delete",
+        "find src -exec rm {} +",
+        "find . -exec sed -i s/a/b/ {} +",
+    ]]
+    + [("qa", c, "block") for c in [
+        "find tests -name '*.js' -delete",
+        "timeout 5 sed -i s/a/b/ src/a.js",
+    ]]
+    + [("dev", c, "allow") for c in [
+        "if true; then npm test; fi",
+        "for f in a b; do echo $f; done",
+        "while read l; do echo $l; done < list.txt",
+        "{ echo a; echo b; } > /tmp/out.txt",
+        "! git diff --quiet",
+        "timeout 5 npm test",
+        "timeout -s KILL 5 npm test",
+        "nice -n 5 npm test",
+        "caffeinate -i npm test",
+        "sudo -u root npm test",
+        "find . -name '*.pyc' -delete",
+        "find . -name x -exec rm -rf {} +",
+        "find src -name '*.js' -exec grep -l foo {} \\;",
+        "bash scripts/run.sh",
+        "bash -c 'npm test'",
+        "bash <<< 'npm test'",
+        "sh <<EOF\nnpm test\nEOF",
+        "echo hi | cat",
+    ]]
+    + [("rev", c, "allow") for c in [
+        "timeout 5 npm test",
+        "if true; then npm test; fi",
+        "find src -name '*.js' -exec grep -l foo {} \\;",
+        "find /tmp/etk-scratch -delete",
+        "for f in a b; do echo $f; done",
+    ]]
+)
+
+CASES = BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND
 
 
 def make_project(base: Path) -> Path:

@@ -13,7 +13,10 @@ the same command moves the directory later segments are judged in; when the targ
 be known (`cd $X`, `cd -`) relative paths are judged as if they were outside the project.
 Nested shells
 (`bash -c`, `eval`, `$(...)`, backticks) are checked recursively, and heredoc
-bodies are checked line by line like any other command text (fail closed).
+bodies are checked line by line like any other command text (fail closed). Shell
+keywords (`then`, `do`, `{`, `!`), wrappers (`timeout`, `nice`, `sudo -u x`) and
+`find -exec/-delete` are seen through; a shell reading commands from a pipe can't be
+checked and is blocked.
 
 Blocks (exit 2, reason on stderr so the agent can adapt):
   - pushing, merging PRs, publishing, deploying, infra changes
@@ -67,7 +70,22 @@ SECRET_NAME = re.compile(
 SECRET_OK = re.compile(r"\.(example|sample|template|dist)$")
 
 GIT_GLOBAL_WITH_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
-WRAPPERS = {"sudo", "env", "command", "nohup", "time", "exec", "xargs"}
+WRAPPERS = {"sudo", "doas", "env", "command", "builtin", "nohup", "time", "exec", "xargs", "setsid", "timeout",
+            "nice", "ionice", "stdbuf", "caffeinate", "unbuffer"}
+WRAPPER_OPTS_WITH_ARG = {
+    "sudo": {"-u", "-g", "-h", "-p", "-C", "-T", "-r", "-t", "-U", "-D", "-R"},
+    "doas": {"-u", "-C"},
+    "env": {"-u", "-C"},
+    "timeout": {"-s", "-k", "--signal", "--kill-after"},
+    "nice": {"-n", "--adjustment"},
+    "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata"},
+    "stdbuf": {"-i", "-o", "-e", "--input", "--output", "--error"},
+    "caffeinate": {"-t", "-w"},
+    "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a", "--max-args", "--max-procs", "--delimiter"},
+}
+WRAPPER_POSITIONALS = {"timeout": 1}  # the duration
+# Words that start a command inside compound syntax (`if x; then y; fi`, `{ y; }`, `! y`).
+SHELL_KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "{", "}", "!", "fi", "done"}
 
 
 class Blocked(Exception):
@@ -331,16 +349,26 @@ def parse(text: str) -> list:
 
 
 def program(words: list[str]) -> list[str]:
-    """Skip env assignments and wrappers like sudo/env so we see the real program."""
+    """Skip shell keywords, env assignments and wrappers like sudo/timeout to see the real program."""
     i = 0
     while i < len(words):
         w = words[i]
         base = os.path.basename(w)
-        if re.match(r"^\w+=", w) or base in WRAPPERS or (i > 0 and os.path.basename(words[i - 1]) in {"env", "sudo"}
-                                                         and w.startswith("-")):
+        if w in SHELL_KEYWORDS or re.match(r"^\w+=", w):
             i += 1
-            continue
-        break
+        elif base in WRAPPERS:
+            i += 1
+            takes_arg = WRAPPER_OPTS_WITH_ARG.get(base, set())
+            while i < len(words) and words[i].startswith("-") and words[i] != "-":
+                opt = words[i]
+                i += 1
+                if opt == "--":
+                    break
+                if opt in takes_arg and i < len(words):
+                    i += 1
+            i += WRAPPER_POSITIONALS.get(base, 0)
+        else:
+            break
     return words[i:]
 
 
@@ -546,6 +574,91 @@ def next_dir(words: list[str], cur: str | None, dirs: list) -> str | None:
     return None if joined is None else os.path.normpath(joined)
 
 
+def check_find(args: list[str], root: str, role: str, depth: int, cur: str | None) -> None:
+    """`find -delete` is an rm -r over the start points; `-exec CMD {} ;` runs CMD on them."""
+    i = 0
+    while i < len(args) and re.match(r"^-([HLP]|[DO]\w*)$", args[i]):
+        i += 1
+    roots = []
+    while i < len(args) and not args[i].startswith(("-", "(", "!")):
+        roots.append(args[i])
+        i += 1
+    roots = [r.rstrip("/") + "/__match__" if r != "/" else "/__match__" for r in roots or ["."]]
+    exprs = args[i:]
+    if "-delete" in exprs:
+        for r in roots:
+            check_words(["rm", "-r", r], root, role, depth + 1, cur)
+        if role == "qa-engineer" and not all(scratch(r, root, cur) for r in roots):
+            raise Blocked("qa-engineer may only create new files, not delete existing ones")
+    for j, e in enumerate(exprs):
+        if e not in {"-exec", "-execdir", "-ok", "-okdir"}:
+            continue
+        end = next((k for k in range(j + 1, len(exprs)) if exprs[k] in {";", "+"}), len(exprs))
+        for r in roots:
+            check_words(program([w.replace("{}", r) for w in exprs[j + 1:end]]), root, role, depth + 1, cur)
+
+
+def check_words(words: list[str], root: str, role: str, depth: int, cur: str | None, seg: Seg | None = None) -> None:
+    """Judge one simple command (already stripped of wrappers and shell keywords)."""
+    if not words:
+        return
+    redirs = seg.redirs if seg else []
+    read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
+    create_only = role == "qa-engineer"
+    prog = os.path.basename(words[0])
+    if prog == "eval":
+        check_bash(" ".join(words[1:]), root, role, depth + 1, cur)
+        return
+    if prog in SHELLS:
+        idx = next((i for i, w in enumerate(words[1:], 1) if re.match(r"^-[a-zA-Z]*c[a-zA-Z]*$", w)), None)
+        if idx is not None:
+            script = next((w for w in words[idx + 1:] if not w.startswith("-")), None)
+            if script is None:
+                raise Blocked(f"`{prog} -c` without a script can't be checked")
+            check_bash(script, root, role, depth + 1, cur)
+        elif not any(not w.startswith("-") for w in words[1:]):
+            fed = seg is not None and (seg.heredocs or seg.herestrings)
+            if not fed:
+                raise Blocked(f"`{prog}` reading commands from stdin can't be checked; pass a script file or use -c")
+            for text in (seg.herestrings if seg else []):
+                check_bash(text, root, role, depth + 1, cur)
+    if prog == "find":
+        check_find(words[1:], root, role, depth, cur)
+    line = " ".join([prog] + words[1:])
+    for pattern, reason in DEPLOY:
+        if re.search(pattern, line, re.I):
+            raise Blocked(reason)
+    if prog == "git":
+        check_git(words[1:], root, cur)
+    if prog == "rm":
+        check_rm(words[1:], root, cur)
+    for target in redirect_targets(redirs):
+        if is_secret(target):
+            raise Blocked(f"writing to `{target}` (looks like a secrets file)")
+        if read_only and target not in SAFE_SINKS and not scratch(target, root, cur):
+            raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
+    if create_only:
+        if any(writes_existing(t, root, cur) for t in redirect_targets(redirs)) \
+                or (prog in SHELL_WRITERS and any(writes_existing(t, root, cur) for t in write_operands(prog, words[1:]))) \
+                or (prog == "sed" and any(w.startswith("-i") for w in words[1:])):
+            raise Blocked("qa-engineer may only create new files, not change existing ones")
+    if read_only:
+        words = real_tool(words)
+        prog = os.path.basename(words[0])
+        ops = write_operands(prog, words[1:])
+        writes = prog in SHELL_WRITERS and not (ops and all(scratch(t, root, cur) for t in ops))
+        rest = [w for w in words[1:] if not w.startswith("-") and w not in {"exec", "dlx", "run"}]
+        tool = os.path.basename(rest[0]) if prog in {"npx", "pnpx", "bunx", "pnpm", "yarn", "uvx", "pipx"} and rest else prog
+        inplace = (prog == "sed" and any(w.startswith("-i") or w.startswith("--in-place") for w in words[1:])) \
+            or (re.match(r"^(perl|ruby)[\d.]*$", prog) and any(PERL_INPLACE.match(w) for w in words[1:])) \
+            or any(w in {"--write", "--fix"} or w.startswith(("--write=", "--fix=")) for w in words[1:]) \
+            or (any(tool == name and (flag is None or flag in words[1:]) for name, flag in FORMATTER_WRITE)
+                and not any(w in {"--check", "--diff", "--check-only", "-l", "--list-different"} for w in words[1:]))
+        if writes or inplace \
+                or (prog == "git" and any(w in {"add", "commit", "apply", "mv", "rm", "checkout", "restore"} for w in words[1:3])):
+            raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
+
+
 def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None = UNSET) -> None:
     if depth > MAX_DEPTH:
         raise Blocked("command nests shells too deeply to check")
@@ -555,7 +668,6 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         check_bash(inner, root, role, depth + 1, cur)
     events = parse(cmd)
     read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
-    create_only = role == "qa-engineer"
     if read_only and WRITE_CODE.search(cmd) and any(runs_inline_code(program(e.words)) for e in events if isinstance(e, Seg)):
         raise Blocked(f"{role} is read-only; inline code that writes files isn't allowed")
     dirs: list = []
@@ -571,56 +683,12 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         for body, _ in seg.heredocs:
             check_bash(body, root, role, depth + 1, cur)
         words = program(seg.words)
-        if not words:
-            continue
-        prog = os.path.basename(words[0])
-        if prog in {"cd", "pushd", "popd"}:
+        if words and os.path.basename(words[0]) in {"cd", "pushd", "popd"}:
             new = next_dir(words, cur, dirs)
             if seg.sep not in {"|", "|&"} and seg.after not in {"|", "|&", "&"}:
                 cur = new
             continue
-        if prog == "eval":
-            check_bash(" ".join(words[1:]), root, role, depth + 1, cur)
-            continue
-        if prog in SHELLS:
-            idx = next((i for i, w in enumerate(words[1:], 1) if re.match(r"^-[a-zA-Z]*c[a-zA-Z]*$", w)), None)
-            if idx is not None:
-                if idx + 1 >= len(words):
-                    raise Blocked(f"`{prog} -c` without a script can't be checked")
-                check_bash(words[idx + 1], root, role, depth + 1, cur)
-        line = " ".join([prog] + words[1:])
-        for pattern, reason in DEPLOY:
-            if re.search(pattern, line, re.I):
-                raise Blocked(reason)
-        if prog == "git":
-            check_git(words[1:], root, cur)
-        if prog == "rm":
-            check_rm(words[1:], root, cur)
-        for target in redirect_targets(seg.redirs):
-            if is_secret(target):
-                raise Blocked(f"writing to `{target}` (looks like a secrets file)")
-            if read_only and target not in SAFE_SINKS and not scratch(target, root, cur):
-                raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
-        if create_only:
-            if any(writes_existing(t, root, cur) for t in redirect_targets(seg.redirs)) \
-                    or (prog in SHELL_WRITERS and any(writes_existing(t, root, cur) for t in write_operands(prog, words[1:]))) \
-                    or (prog == "sed" and any(w.startswith("-i") for w in words[1:])):
-                raise Blocked("qa-engineer may only create new files, not change existing ones")
-        if read_only:
-            words = real_tool(words)
-            prog = os.path.basename(words[0])
-            ops = write_operands(prog, words[1:])
-            writes = prog in SHELL_WRITERS and not (ops and all(scratch(t, root, cur) for t in ops))
-            rest = [w for w in words[1:] if not w.startswith("-") and w not in {"exec", "dlx", "run"}]
-            tool = os.path.basename(rest[0]) if prog in {"npx", "pnpx", "bunx", "pnpm", "yarn", "uvx", "pipx"} and rest else prog
-            inplace = (prog == "sed" and any(w.startswith("-i") or w.startswith("--in-place") for w in words[1:])) \
-                or (re.match(r"^(perl|ruby)[\d.]*$", prog) and any(PERL_INPLACE.match(w) for w in words[1:])) \
-                or any(w in {"--write", "--fix"} or w.startswith(("--write=", "--fix=")) for w in words[1:]) \
-                or (any(tool == name and (flag is None or flag in words[1:]) for name, flag in FORMATTER_WRITE)
-                    and not any(w in {"--check", "--diff", "--check-only", "-l", "--list-different"} for w in words[1:]))
-            if writes or inplace \
-                    or (prog == "git" and any(w in {"add", "commit", "apply", "mv", "rm", "checkout", "restore"} for w in words[1:3])):
-                raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
+        check_words(words, root, role, depth, cur, seg)
 
 
 def decide(data: dict) -> str | None:
