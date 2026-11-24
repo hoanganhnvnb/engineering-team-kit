@@ -11,9 +11,11 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -307,8 +309,35 @@ WRAPPER_OPTS = (
     ]]
 )
 
+# cd tracking must fail closed when the shell could end up somewhere else.
+CD_FAIL_CLOSED = (
+    [("dev", c, "block") for c in [
+        "eval 'cd ..' && rm -rf other",
+        "eval 'pushd ..'; rm -rf other",
+        "source ./env.sh && rm -rf out",
+        ". ./env.sh && rm -rf out",
+        "export CDPATH=/etc && cd x && rm -rf y",
+        "declare -x CDPATH=/etc; cd x && rm -rf y",
+        "env CDPATH=/etc cd x && rm -rf y",
+        "CDPATH+=:/etc cd x && rm -rf y",
+        "cd a b && rm -rf other",
+        "pushd a b && rm -rf x",
+        "pushd src && popd x && rm -rf out",
+        "cd src; rm -rf build",
+        "cd src || rm -rf build",
+        "pushd src; rm -rf build",
+        "pushd src && pushd .. | cat; popd && rm -rf ../x",
+    ]]
+    + [("rev", "cd /tmp; echo y > z", "block")]
+    + [("dev", c, "allow") for c in [
+        "eval 'echo hi' | cat; rm -rf build",
+        "cd src && rm -rf build",
+        "pushd src && popd && rm -rf build",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED)
 
 
 def make_project(base: Path) -> Path:
@@ -344,6 +373,12 @@ class GuardCorpus(unittest.TestCase):
                 "agent_type": ROLES[role]}
         with contextlib.redirect_stderr(io.StringIO()):
             return "block" if guard.decide(data) is not None else "allow"
+
+    def test_inherited_cdpath_makes_relative_cd_unknown(self):
+        with mock.patch.dict(os.environ, {"CDPATH": "/etc"}):
+            self.assertEqual(self.verdict("dev", "cd src && rm -rf build"), "block")
+            self.assertEqual(self.verdict("dev", "cd ./src && rm -rf build"), "allow")
+            self.assertEqual(self.verdict("dev", "cd /tmp && rm -rf scratch"), "allow")
 
     def test_corpus(self):
         for role, cmd, want in CASES:

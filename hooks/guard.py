@@ -616,20 +616,22 @@ def next_dir(words: list[str], cur: str | None, dirs: list) -> str | None:
     """
     prog, args = words[0], words[1:]
     odd = [a for a in args if a.startswith(("-", "+")) and a not in {"-", "--"}]
+    operands = [a for a in args if not a.startswith(("-", "+")) or a == "-"]
     if prog == "cd":
-        if [a for a in odd if a != "-L"]:
-            return None  # -P/-e/-@ resolve symlinks differently
-    elif odd or (prog == "pushd" and not args):
-        dirs[:] = ["?"]  # rotations, -n, bare swap
+        if [a for a in odd if a != "-L"] or len(operands) > 1:
+            return None  # -P/-e/-@ resolve symlinks differently; extra operands are an error
+    elif odd or (prog == "pushd" and len(operands) != 1) or (prog == "popd" and args):
+        dirs[:] = ["?"]  # rotations, -n, bare swap, odd shapes
         return None
     if prog == "popd":
         return None if "?" in dirs or not dirs else dirs.pop()
-    operands = [a for a in args if not a.startswith(("-", "+")) or a == "-"]
     target = operands[0] if operands else None
     if prog == "pushd":
         dirs.append(cur)
     if target is None or target == "-" or target.startswith("~") or re.search(r"[$`*?\[(]", target):
         return None
+    if os.environ.get("CDPATH") and not target.startswith(("/", "./", "../")) and target not in {".", ".."}:
+        return None  # an inherited CDPATH can send a bare `cd x` anywhere
     joined = absjoin(target, cur)
     return None if joined is None else os.path.normpath(joined)
 
@@ -781,16 +783,19 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             check_bash(body, root, role, depth + 1, cur)
         words = program(seg.words)
         in_pipe = seg.sep in {"|", "|&"} or seg.after in {"|", "|&", "&"}
-        if any(w.startswith("CDPATH=") or w == "CDPATH" for w in seg.words) and not in_pipe:
+        if any(re.search(r"\bCDPATH\b", w) for w in seg.words) and not in_pipe:
             cur = None  # `cd x` may land somewhere else entirely
         if words and os.path.basename(words[0]) in {"cd", "pushd", "popd"}:
-            new = next_dir(words, cur, dirs)
+            new = next_dir(words, cur, list(dirs) if in_pipe else dirs)
             if not in_pipe:
-                cur = new
+                # after `;` or `||` the cd may have failed, leaving us where we were
+                cur = None if seg.after in {";", "||"} else new
             continue
         if not in_pipe and any(os.path.basename(w) in {"cd", "pushd", "popd"} for w in words[1:]):
             cur = None  # a cd we can't attribute (find -exec cd, xargs cd): stay strict
         check_words(words, root, role, depth, cur, seg)
+        if words and os.path.basename(words[0]) in {"eval", "source", "."} and not in_pipe:
+            cur, dirs[:] = None, ["?"]  # whatever it did to the directory isn't visible to us
 
 
 def decide(data: dict) -> str | None:
