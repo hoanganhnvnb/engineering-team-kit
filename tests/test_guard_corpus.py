@@ -204,7 +204,37 @@ PROCESS_SUBST = (
        ("rev", "diff <(git show HEAD:a) <(git show HEAD~1:a)", "allow")]
 )
 
-CASES = BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST
+# cd/pushd/popd forms whose target can't be known must make later paths strict.
+CD_UNKNOWN = (
+    [("dev", c, "block") for c in [
+        "pushd +1 && rm -rf out",
+        "pushd && rm -rf out",
+        "pushd -n .. && rm -rf out",
+        "pushd src && popd +0 && rm -rf out",
+        "pushd src && pushd +1 && popd && rm -rf out",
+        "cd -P .. && rm -rf other",
+        "cd -e .. && rm -rf other",
+        "find . -exec cd .. \\; ; rm -rf other",
+        "CDPATH=/ cd src && rm -rf build",
+        "export CDPATH=/etc; cd x && rm -rf y",
+        "command cd .. && rm -rf other",
+        "builtin cd .. && rm -rf other",
+        "{ cd ..; rm -rf other; }",
+        "if true; then cd ..; rm -rf other; fi",
+        "true && cd .. && rm -rf other",
+        "false || cd .. ; rm -rf other",
+        "time cd .. && rm -rf other",
+    ]]
+    + [("rev", "pushd +1 && echo x > z", "block"), ("rev", "cd -P /tmp && echo x > z", "block")]
+    + [("dev", c, "allow") for c in [
+        "pushd src && popd && rm -rf build",
+        "cd -L src && rm -rf build",
+        "cd -- src && rm -rf build",
+        "echo cd",
+    ]]
+)
+
+CASES = BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN
 
 
 def make_project(base: Path) -> Path:

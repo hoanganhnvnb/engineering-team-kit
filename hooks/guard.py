@@ -560,12 +560,22 @@ def runs_inline_code(words: list[str]) -> bool:
 
 
 def next_dir(words: list[str], cur: str | None, dirs: list) -> str | None:
-    """Working directory after `cd`/`pushd`/`popd`; None once it can't be known."""
-    prog = words[0]
+    """Working directory after `cd`/`pushd`/`popd`; None once it can't be known.
+
+    `dirs` is the pushd stack; a "?" entry means a stack operation we didn't model.
+    """
+    prog, args = words[0], words[1:]
+    odd = [a for a in args if a.startswith(("-", "+")) and a not in {"-", "--"}]
+    if prog == "cd":
+        if [a for a in odd if a != "-L"]:
+            return None  # -P/-e/-@ resolve symlinks differently
+    elif odd or (prog == "pushd" and not args):
+        dirs[:] = ["?"]  # rotations, -n, bare swap
+        return None
     if prog == "popd":
-        return dirs.pop() if dirs else None
-    args = [a for a in words[1:] if not a.startswith("-") or a == "-"]
-    target = args[0] if args else None
+        return None if "?" in dirs or not dirs else dirs.pop()
+    operands = [a for a in args if not a.startswith(("-", "+")) or a == "-"]
+    target = operands[0] if operands else None
     if prog == "pushd":
         dirs.append(cur)
     if target is None or target == "-" or target.startswith("~") or re.search(r"[$`*?\[(]", target):
@@ -685,11 +695,16 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         for body, _ in seg.heredocs:
             check_bash(body, root, role, depth + 1, cur)
         words = program(seg.words)
+        in_pipe = seg.sep in {"|", "|&"} or seg.after in {"|", "|&", "&"}
+        if any(w.startswith("CDPATH=") or w == "CDPATH" for w in seg.words) and not in_pipe:
+            cur = None  # `cd x` may land somewhere else entirely
         if words and os.path.basename(words[0]) in {"cd", "pushd", "popd"}:
             new = next_dir(words, cur, dirs)
-            if seg.sep not in {"|", "|&"} and seg.after not in {"|", "|&", "&"}:
+            if not in_pipe:
                 cur = new
             continue
+        if not in_pipe and any(os.path.basename(w) in {"cd", "pushd", "popd"} for w in words[1:]):
+            cur = None  # a cd we can't attribute (find -exec cd, xargs cd): stay strict
         check_words(words, root, role, depth, cur, seg)
 
 
