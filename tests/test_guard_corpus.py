@@ -271,7 +271,44 @@ SHELL_ARGV = (
     ]]
 )
 
-CASES = BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
+# Wrapper options with values, env -S, unknown wrapper options, and more compound keywords.
+WRAPPER_OPTS = (
+    [("dev", c, "block") for c in [
+        "env -S 'git push'",
+        "env --split-string='git push'",
+        "env -i -S 'git push'",
+        "exec -a x git push",
+        "time -f %e git push",
+        "time -o /tmp/t git push",
+        "time --format x git push",
+        "timeout --weird 5 git push",
+        "sudo --weird git push",
+        "case x in a) git push;; esac",
+        "function f { git push; }",
+        "f() { git push; }; f",
+        "coproc git push",
+        "coproc NAME { git push; }",
+        "select x in a b; do git push; done",
+        "{ ! git push; }",
+        "if ! git push; then echo no; fi",
+    ]]
+    + [("dev", c, "allow") for c in [
+        "timeout --preserve-status 5 npm test",
+        "env -i FOO=1 npm test",
+        "env -S 'npm test'",
+        "xargs -n1 echo",
+        "echo a b | xargs -I {} echo {}",
+        "nice -5 npm test",
+        "sudo -E npm test",
+        "case x in a) echo hi;; esac",
+        "f() { echo hi; }; f",
+        "function f { echo hi; }",
+        "time -p npm test",
+    ]]
+)
+
+CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
+         + WRAPPER_OPTS)
 
 
 def make_project(base: Path) -> Path:

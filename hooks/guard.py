@@ -72,20 +72,36 @@ SECRET_OK = re.compile(r"\.(example|sample|template|dist)$")
 GIT_GLOBAL_WITH_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
 WRAPPERS = {"sudo", "doas", "env", "command", "builtin", "nohup", "time", "exec", "xargs", "setsid", "timeout",
             "nice", "ionice", "stdbuf", "caffeinate", "unbuffer"}
+# Options that take a value, and the plain flags we know for each wrapper. An option we
+# don't know could swallow the next word, so the command can't be attributed: block.
 WRAPPER_OPTS_WITH_ARG = {
     "sudo": {"-u", "-g", "-h", "-p", "-C", "-T", "-r", "-t", "-U", "-D", "-R"},
     "doas": {"-u", "-C"},
-    "env": {"-u", "-C"},
+    "env": {"-u", "-C", "--unset", "--chdir"},
     "timeout": {"-s", "-k", "--signal", "--kill-after"},
     "nice": {"-n", "--adjustment"},
     "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata"},
     "stdbuf": {"-i", "-o", "-e", "--input", "--output", "--error"},
     "caffeinate": {"-t", "-w"},
     "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a", "--max-args", "--max-procs", "--delimiter"},
+    "exec": {"-a"},
+    "time": {"-f", "-o", "--format", "--output"},
+}
+def dash(letters: str) -> set:
+    return {f"-{c}" for c in letters}
+
+
+WRAPPER_FLAGS = {
+    "sudo": dash("EHnSsibAkKPelv"), "doas": dash("ns"), "env": dash("i0v"), "command": dash("pvV"),
+    "timeout": {"--preserve-status", "--foreground", "-v", "--verbose"}, "ionice": {"-t"},
+    "caffeinate": dash("dimsu"), "time": dash("pva") | {"--append", "--portability", "--verbose"},
+    "exec": dash("cl"), "setsid": dash("cfw"), "unbuffer": {"-p"}, "builtin": set(), "nohup": set(), "stdbuf": set(),
+    "xargs": dash("0rtpxo") | {"--null", "--no-run-if-empty", "--verbose", "--interactive"}, "nice": set(),
 }
 WRAPPER_POSITIONALS = {"timeout": 1}  # the duration
 # Words that start a command inside compound syntax (`if x; then y; fi`, `{ y; }`, `! y`).
-SHELL_KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "{", "}", "!", "fi", "done"}
+SHELL_KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "{", "}", "!", "fi", "done", "case", "in",
+                  "esac", "select", "coproc"}
 
 
 class Blocked(Exception):
@@ -348,14 +364,35 @@ def parse(text: str) -> list:
     return events
 
 
+def known_wrapper_option(base: str, opt: str) -> bool:
+    takes = WRAPPER_OPTS_WITH_ARG.get(base, set())
+    flags = WRAPPER_FLAGS.get(base, set())
+    if opt in flags or opt in takes:
+        return True
+    if opt.startswith("--"):
+        return "=" in opt and opt.split("=", 1)[0] in takes
+    if base == "nice" and re.match(r"^-\d+$", opt):
+        return True
+    if base == "env" and opt == "-":
+        return True
+    if opt[:2] in takes:
+        return True  # attached value, like -n5 or -oL
+    return len(opt) > 2 and all(f"-{c}" in flags for c in opt[1:])
+
+
 def program(words: list[str]) -> list[str]:
     """Skip shell keywords, env assignments and wrappers like sudo/timeout to see the real program."""
+    words = list(words)
     i = 0
     while i < len(words):
         w = words[i]
         base = os.path.basename(w)
-        if w in SHELL_KEYWORDS or re.match(r"^\w+=", w):
+        if w == "coproc" and "{" in words[i:]:
+            i = words.index("{", i) + 1
+        elif w in SHELL_KEYWORDS or re.match(r"^\w+=", w):
             i += 1
+        elif w == "function" and i + 1 < len(words):
+            i += 2
         elif base in WRAPPERS:
             i += 1
             takes_arg = WRAPPER_OPTS_WITH_ARG.get(base, set())
@@ -364,6 +401,19 @@ def program(words: list[str]) -> list[str]:
                 i += 1
                 if opt == "--":
                     break
+                if base == "env" and (opt in {"-S", "--split-string"} or opt.startswith(("--split-string=", "-S"))):
+                    value = opt.split("=", 1)[1] if opt.startswith("--split-string=") else (opt[2:] or None)
+                    if value is None:
+                        if i >= len(words):
+                            raise Blocked("`env -S` without a value can't be checked")
+                        value, i = words[i], i + 1
+                    try:
+                        words[i:i] = shlex.split(value)
+                    except ValueError:
+                        raise Blocked("`env -S` value can't be parsed")
+                    continue
+                if not known_wrapper_option(base, opt):
+                    raise Blocked(f"`{base} {opt}` is an option the guard doesn't know; can't tell what it runs")
                 if opt in takes_arg and i < len(words):
                     i += 1
             i += WRAPPER_POSITIONALS.get(base, 0)
