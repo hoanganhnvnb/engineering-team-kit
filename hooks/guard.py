@@ -680,6 +680,8 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             if groups:
                 cur, dirs = groups.pop()
             continue
+        for body in seg.subs:
+            check_bash(body, root, role, depth + 1, cur)
         for body, _ in seg.heredocs:
             check_bash(body, root, role, depth + 1, cur)
         words = program(seg.words)

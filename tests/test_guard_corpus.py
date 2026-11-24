@@ -196,7 +196,15 @@ R1_2_COMPOUND = (
     ]]
 )
 
-CASES = BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND
+# Process substitution bodies run as commands too.
+PROCESS_SUBST = (
+    [("dev", c, "block") for c in ["cat <(rm -rf /)", "cat <(git push)", "diff <(git push) x", "echo hi | tee >(git push)"]]
+    + [("rev", "cat <(echo x > src/a.js)", "block")]
+    + [("dev", "diff <(git show HEAD:a) <(git show HEAD~1:a)", "allow"),
+       ("rev", "diff <(git show HEAD:a) <(git show HEAD~1:a)", "allow")]
+)
+
+CASES = BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST
 
 
 def make_project(base: Path) -> Path:
