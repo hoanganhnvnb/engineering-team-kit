@@ -8,7 +8,10 @@ them, and a plugin should not change how unrelated sessions behave.
 
 Commands are split into segments (&&, ||, ;, |, newlines) and each segment is
 judged by the program it actually runs, so `grep "git push" docs/` or a commit
-message mentioning `rebase` is fine, while `git -C . push` is not. Nested shells
+message mentioning `rebase` is fine, while `git -C . push` is not. A `cd`/`pushd` earlier in
+the same command moves the directory later segments are judged in; when the target can't
+be known (`cd $X`, `cd -`) relative paths are judged as if they were outside the project.
+Nested shells
 (`bash -c`, `eval`, `$(...)`, backticks) are checked recursively, and heredoc
 bodies are checked line by line like any other command text (fail closed).
 
@@ -34,6 +37,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from typing import Any
 
 PREFIX = "engineering-team:"
 READ_ONLY_ROLES = {"code-reviewer", "ux-reviewer", "scout"}
@@ -77,6 +81,7 @@ def is_secret(path: str) -> bool:
 
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 MAX_DEPTH = 4
+UNSET: Any = object()  # "not given", as opposed to None (= directory unknown)
 
 
 def substitutions(cmd: str) -> list[str]:
@@ -96,26 +101,233 @@ def substitutions(cmd: str) -> list[str]:
     return out
 
 
-def segments(cmd: str) -> list[list[str]]:
-    text = cmd.replace("\n", " ; ")
-    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|<>()")
-    lex.whitespace_split = True
-    lex.commenters = ""
-    try:
-        tokens = list(lex)
-    except ValueError:  # unbalanced quotes: fall back to a plain split
-        tokens = text.split()
-    segs, cur = [], []
-    for tok in tokens:
-        if tok and set(tok) <= set(";&|()"):
-            if cur:
-                segs.append(cur)
-            cur = []
+class Tok:
+    __slots__ = ("kind", "text", "subs", "quoted", "body")
+
+    def __init__(self, kind, text, subs=None, quoted=False):
+        self.kind, self.text, self.subs, self.quoted, self.body = kind, text, subs or [], quoted, None
+
+
+class Seg:
+    """One simple command: argv without redirections, plus what hangs off it."""
+
+    def __init__(self, sep: str):
+        self.words: list[str] = []
+        self.subs: list[str] = []  # $(...) and `...` bodies that are live (not single-quoted)
+        self.redirs: list[tuple[str, str]] = []  # (operator, target)
+        self.heredocs: list[tuple[str, bool]] = []  # (body, body expands $(...))
+        self.herestrings: list[str] = []
+        self.sep = sep  # operator before this command
+        self.after = ""  # operator after it
+
+
+OPERATORS = ["&>>", "<<<", "<<-", ">>", "&&", "||", ";;", "|&", "&>", ">&", "<&", ">|", "<<", "<>",
+             ";", "&", "|", "(", ")", "<", ">"]
+REDIRECTS = {"<", ">", ">>", ">|", "&>", "&>>", ">&", "<&", "<>", "<<", "<<-", "<<<"}
+PUSH, POP = "push", "pop"
+
+
+def _balanced(text: str, i: int) -> int:
+    """Index just past the `)` closing a `(` that was opened right before text[i]."""
+    depth, quote = 1, None
+    while i < len(text) and depth:
+        c = text[i]
+        if quote:
+            if c == "\\" and quote == '"':
+                i += 1
+            elif c == quote:
+                quote = None
+        elif c == "\\":
+            i += 1
+        elif c in "'\"":
+            quote = c
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        i += 1
+    return i
+
+
+def _backtick(text: str, i: int) -> int:
+    """Index of the closing backtick for one opened right before text[i]."""
+    while i < len(text) and text[i] != "`":
+        i += 2 if text[i] == "\\" else 1
+    return i
+
+
+def find_subs(text: str) -> list[str]:
+    """$(...) and `...` bodies in text that is not single-quoted (heredoc bodies)."""
+    out, i = [], 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\":
+            i += 2
+        elif text.startswith("$((", i):
+            i = _balanced(text, i + 2)
+        elif text.startswith("$(", i):
+            end = _balanced(text, i + 2)
+            out.append(text[i + 2:end - 1])
+            i = end
+        elif c == "`":
+            end = _backtick(text, i + 1)
+            out.append(text[i + 1:end])
+            i = end + 1
         else:
-            cur.append(tok)
-    if cur:
-        segs.append(cur)
-    return segs
+            i += 1
+    return out
+
+
+def tokenize(text: str) -> list[Tok]:
+    toks: list[Tok] = []
+    buf: list[str] = []
+    subs: list[str] = []
+    state = {"has": False, "quoted": False, "delim": None}
+    pending: list[tuple[Tok, bool]] = []
+    i, n = 0, len(text)
+
+    def flush() -> None:
+        if state["has"]:
+            tok = Tok("w", "".join(buf), subs[:], state["quoted"])
+            toks.append(tok)
+            if state["delim"] is not None:
+                pending.append((tok, state["delim"]))
+                state["delim"] = None
+        buf.clear()
+        subs.clear()
+        state["has"] = state["quoted"] = False
+
+    while i < n:
+        c = text[i]
+        if c in " \t":
+            flush()
+            i += 1
+        elif c == "\n":
+            flush()
+            toks.append(Tok("op", ";"))
+            i += 1
+            for tok, strip in pending:
+                body, found = [], False
+                while i < n and not found:
+                    end = text.find("\n", i)
+                    end = n if end < 0 else end
+                    line = text[i:end]
+                    i = end + 1
+                    if (line.lstrip("\t") if strip else line) == tok.text:
+                        found = True
+                    else:
+                        body.append(line)
+                tok.body = "\n".join(body)
+            pending.clear()
+        elif c == "\\":
+            if i + 1 < n and text[i + 1] == "\n":
+                i += 2
+                continue
+            buf.append(text[i + 1] if i + 1 < n else "")
+            state["has"] = state["quoted"] = True
+            i += 2
+        elif c == "'":
+            end = text.find("'", i + 1)
+            end = n if end < 0 else end
+            buf.append(text[i + 1:end])
+            state["has"] = state["quoted"] = True
+            i = end + 1
+        elif c == '"':
+            state["has"] = state["quoted"] = True
+            i += 1
+            while i < n and text[i] != '"':
+                if text[i] == "\\" and i + 1 < n:
+                    buf.append(text[i + 1] if text[i + 1] in '"\\$`' else text[i:i + 2])
+                    i += 2
+                elif text.startswith("$((", i):
+                    end = _balanced(text, i + 2)
+                    buf.append(text[i:end])
+                    i = end
+                elif text.startswith("$(", i):
+                    end = _balanced(text, i + 2)
+                    subs.append(text[i + 2:end - 1])
+                    buf.append(text[i:end])
+                    i = end
+                elif text[i] == "`":
+                    end = _backtick(text, i + 1)
+                    subs.append(text[i + 1:end])
+                    buf.append(text[i:end + 1])
+                    i = end + 1
+                else:
+                    buf.append(text[i])
+                    i += 1
+            i += 1
+        elif text.startswith("$((", i):
+            end = _balanced(text, i + 2)
+            buf.append(text[i:end])
+            state["has"] = True
+            i = end
+        elif text.startswith("$(", i) or (c in "<>" and text.startswith("(", i + 1)):
+            end = _balanced(text, i + 2)
+            subs.append(text[i + 2:end - 1])
+            buf.append(text[i:end])
+            state["has"] = True
+            i = end
+        elif c == "`":
+            end = _backtick(text, i + 1)
+            subs.append(text[i + 1:end])
+            buf.append(text[i:end + 1])
+            state["has"] = True
+            i = end + 1
+        else:
+            op = next((o for o in OPERATORS if text.startswith(o, i)), None)
+            if op is None:
+                buf.append(c)
+                state["has"] = True
+                i += 1
+                continue
+            if op in REDIRECTS and state["has"] and "".join(buf).isdigit() and not state["quoted"]:
+                buf.clear()  # fd prefix like the 2 in 2>
+                state["has"] = False
+            else:
+                flush()
+            toks.append(Tok("op", op))
+            if op in {"<<", "<<-"}:
+                state["delim"] = op == "<<-"
+            i += len(op)
+    flush()
+    return toks
+
+
+def parse(text: str) -> list:
+    """Events in execution order: Seg objects, plus PUSH/POP around ( ... ) groups."""
+    events: list = []
+    cur = Seg("")
+    want = None  # redirect operator waiting for its target
+
+    def close(next_sep: str) -> None:
+        nonlocal cur
+        if cur.words or cur.redirs or cur.subs:
+            cur.after = next_sep
+            events.append(cur)
+        cur = Seg(next_sep)
+
+    for tok in tokenize(text):
+        if tok.kind == "w":
+            cur.subs.extend(tok.subs)
+            if want is None:
+                cur.words.append(tok.text)
+                continue
+            if want in {"<<", "<<-"}:
+                cur.heredocs.append((tok.body or "", not tok.quoted))
+            elif want == "<<<":
+                cur.herestrings.append(tok.text)
+            cur.redirs.append((want, tok.text))
+            want = None
+        elif tok.text in REDIRECTS:
+            want = tok.text
+        elif tok.text in {"(", ")"}:
+            close(tok.text)
+            events.append(PUSH if tok.text == "(" else POP)
+        else:
+            close(tok.text)
+    close("")
+    return events
 
 
 def program(words: list[str]) -> list[str]:
@@ -132,19 +344,28 @@ def program(words: list[str]) -> list[str]:
     return words[i:]
 
 
-def redirect_targets(words: list[str]) -> list[str]:
+def redirect_targets(redirs: list[tuple[str, str]]) -> list[str]:
     """Targets of >, >>, >|, &>, &>>, N> (fd duplications like 2>&1 are skipped)."""
     out = []
-    for i, w in enumerate(words[:-1]):
-        if ">" in w and set(w) <= set("<>&|"):
-            target = words[i + 1]
-            if w.endswith("&") and (target.isdigit() or target == "-"):
-                continue  # fd duplication like 2>&1 or >&-
-            out.append(target)
+    for op, target in redirs:
+        if op not in {">", ">>", ">|", "&>", "&>>", ">&", "<>"}:
+            continue
+        if op == ">&" and (target.isdigit() or target == "-"):
+            continue  # fd duplication like 2>&1 or >&-
+        out.append(target)
     return out
 
 
-def inside(path: str, base: str) -> bool:
+def absjoin(path: str, cur: str | None) -> str | None:
+    """Absolute form of path, or None when it is relative to a directory we can't know."""
+    if os.path.isabs(path):
+        return path
+    return None if cur is None else os.path.join(cur, path)
+
+
+def inside(path: str | None, base: str) -> bool:
+    if path is None:
+        return False
     real, base = os.path.realpath(path), os.path.realpath(base)
     return real == base or real.startswith(base + os.sep)
 
@@ -154,15 +375,15 @@ def temp_roots() -> list[str]:
     return [os.path.realpath(r) for r in roots]
 
 
-def in_temp(path: str, cwd: str) -> bool:
-    p = path if os.path.isabs(path) else os.path.join(cwd, path)
-    return any(inside(p, t) for t in temp_roots())
+def in_temp(path: str, cur: str | None) -> bool:
+    p = absjoin(path, cur)
+    return p is not None and any(inside(p, t) for t in temp_roots())
 
 
-def scratch(path: str, cwd: str) -> bool:
+def scratch(path: str, root: str, cur: str | None) -> bool:
     """A temp path that is not part of the project (projects can live under /tmp too)."""
-    p = path if os.path.isabs(path) else os.path.join(cwd, path)
-    return in_temp(p, cwd) and not inside(p, cwd)
+    p = absjoin(path, cur)
+    return p is not None and in_temp(p, cur) and not inside(p, root)
 
 
 def untracked_secrets(cwd: str) -> list[str]:
@@ -174,12 +395,13 @@ def untracked_secrets(cwd: str) -> list[str]:
     return [f for f in out.splitlines() if is_secret(f)]
 
 
-def check_git(args: list[str], cwd: str) -> None:
+def check_git(args: list[str], cwd: str, cur: str | None) -> None:
     i = 0
     while i < len(args) and args[i].startswith("-"):
         if args[i] == "-C" and i + 1 < len(args):
-            cwd = os.path.join(cwd, args[i + 1])
+            cur = absjoin(args[i + 1], cur)
         i += 2 if args[i] in GIT_GLOBAL_WITH_ARG else 1
+    cwd = cur or cwd
     if i >= len(args):
         return
     sub, rest = args[i], args[i + 1:]
@@ -225,7 +447,7 @@ def check_git(args: list[str], cwd: str) -> None:
                 raise Blocked(f"`git add -A/.` would stage secret-looking files {secrets[:3]}; add paths explicitly")
 
 
-def check_rm(args: list[str], cwd: str) -> None:
+def check_rm(args: list[str], root: str, cur: str | None) -> None:
     opts = [a for a in args if a.startswith("-")]
     recursive = any("r" in o.lower() for o in opts if not o.startswith("--")) or "--recursive" in opts
     if not recursive:
@@ -235,8 +457,10 @@ def check_rm(args: list[str], cwd: str) -> None:
             raise Blocked(f"`rm -r {target}` is too broad")
         if "$" in target or "`" in target:
             raise Blocked(f"`rm -r {target}` uses a variable; spell the path out so it can be checked")
-        path = target if os.path.isabs(target) else os.path.join(cwd, target)
-        if (inside(path, cwd) and os.path.realpath(path) != os.path.realpath(cwd)) or in_temp(path, cwd):
+        path = absjoin(target, cur)
+        if path is None:
+            raise Blocked(f"`rm -r {target}` runs after a `cd` that can't be resolved; use absolute paths")
+        if (inside(path, root) and os.path.realpath(path) != os.path.realpath(root)) or in_temp(path, cur):
             continue
         raise Blocked(f"`rm -r {target}` is outside the project")
 
@@ -279,9 +503,9 @@ def write_operands(prog: str, args: list[str]) -> list[str]:
     return ops  # rm, mv (sources disappear too), chmod, chown, touch, truncate, tee, patch
 
 
-def writes_existing(target: str, cwd: str) -> bool:
-    path = target if os.path.isabs(target) else os.path.join(cwd, target)
-    return os.path.exists(path) and not scratch(path, cwd)
+def writes_existing(target: str, root: str, cur: str | None) -> bool:
+    path = absjoin(target, cur)
+    return path is None or (os.path.exists(path) and not scratch(path, root, cur))
 
 
 def real_tool(words: list[str]) -> list[str]:
@@ -307,53 +531,86 @@ def runs_inline_code(words: list[str]) -> bool:
     return not args or any(INLINE_FLAG.match(a) for a in args)
 
 
-def check_bash(cmd: str, cwd: str, role: str, depth: int = 0) -> None:
+def next_dir(words: list[str], cur: str | None, dirs: list) -> str | None:
+    """Working directory after `cd`/`pushd`/`popd`; None once it can't be known."""
+    prog = words[0]
+    if prog == "popd":
+        return dirs.pop() if dirs else None
+    args = [a for a in words[1:] if not a.startswith("-") or a == "-"]
+    target = args[0] if args else None
+    if prog == "pushd":
+        dirs.append(cur)
+    if target is None or target == "-" or target.startswith("~") or re.search(r"[$`*?\[(]", target):
+        return None
+    joined = absjoin(target, cur)
+    return None if joined is None else os.path.normpath(joined)
+
+
+def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None = UNSET) -> None:
     if depth > MAX_DEPTH:
         raise Blocked("command nests shells too deeply to check")
+    if cur is UNSET:
+        cur = root
     for inner in substitutions(cmd):
-        check_bash(inner, cwd, role, depth + 1)
+        check_bash(inner, root, role, depth + 1, cur)
+    events = parse(cmd)
     read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
     create_only = role == "qa-engineer"
-    if read_only and WRITE_CODE.search(cmd) and any(runs_inline_code(program(seg)) for seg in segments(cmd)):
+    if read_only and WRITE_CODE.search(cmd) and any(runs_inline_code(program(e.words)) for e in events if isinstance(e, Seg)):
         raise Blocked(f"{role} is read-only; inline code that writes files isn't allowed")
-    for seg in segments(cmd):
-        words = program(seg)
+    dirs: list = []
+    groups: list = []
+    for seg in events:
+        if seg is PUSH:
+            groups.append((cur, list(dirs)))
+            continue
+        if seg is POP:
+            if groups:
+                cur, dirs = groups.pop()
+            continue
+        for body, _ in seg.heredocs:
+            check_bash(body, root, role, depth + 1, cur)
+        words = program(seg.words)
         if not words:
             continue
         prog = os.path.basename(words[0])
+        if prog in {"cd", "pushd", "popd"}:
+            new = next_dir(words, cur, dirs)
+            if seg.sep not in {"|", "|&"} and seg.after not in {"|", "|&", "&"}:
+                cur = new
+            continue
         if prog == "eval":
-            check_bash(" ".join(words[1:]), cwd, role, depth + 1)
+            check_bash(" ".join(words[1:]), root, role, depth + 1, cur)
             continue
         if prog in SHELLS:
             idx = next((i for i, w in enumerate(words[1:], 1) if re.match(r"^-[a-zA-Z]*c[a-zA-Z]*$", w)), None)
             if idx is not None:
                 if idx + 1 >= len(words):
                     raise Blocked(f"`{prog} -c` without a script can't be checked")
-                check_bash(words[idx + 1], cwd, role, depth + 1)
+                check_bash(words[idx + 1], root, role, depth + 1, cur)
         line = " ".join([prog] + words[1:])
         for pattern, reason in DEPLOY:
             if re.search(pattern, line, re.I):
                 raise Blocked(reason)
         if prog == "git":
-            check_git(words[1:], cwd)
+            check_git(words[1:], root, cur)
         if prog == "rm":
-            check_rm(words[1:], cwd)
-        for target in redirect_targets(seg):
+            check_rm(words[1:], root, cur)
+        for target in redirect_targets(seg.redirs):
             if is_secret(target):
                 raise Blocked(f"writing to `{target}` (looks like a secrets file)")
-            if read_only and target not in SAFE_SINKS and not scratch(target, cwd):
+            if read_only and target not in SAFE_SINKS and not scratch(target, root, cur):
                 raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
         if create_only:
-            targets = [w for w in words[1:] if not w.startswith("-")]
-            if any(writes_existing(t, cwd) for t in redirect_targets(seg)) \
-                    or (prog in SHELL_WRITERS and any(writes_existing(t, cwd) for t in write_operands(prog, words[1:]))) \
+            if any(writes_existing(t, root, cur) for t in redirect_targets(seg.redirs)) \
+                    or (prog in SHELL_WRITERS and any(writes_existing(t, root, cur) for t in write_operands(prog, words[1:]))) \
                     or (prog == "sed" and any(w.startswith("-i") for w in words[1:])):
                 raise Blocked("qa-engineer may only create new files, not change existing ones")
         if read_only:
             words = real_tool(words)
             prog = os.path.basename(words[0])
             ops = write_operands(prog, words[1:])
-            writes = prog in SHELL_WRITERS and not (ops and all(scratch(t, cwd) for t in ops))
+            writes = prog in SHELL_WRITERS and not (ops and all(scratch(t, root, cur) for t in ops))
             rest = [w for w in words[1:] if not w.startswith("-") and w not in {"exec", "dlx", "run"}]
             tool = os.path.basename(rest[0]) if prog in {"npx", "pnpx", "bunx", "pnpm", "yarn", "uvx", "pipx"} and rest else prog
             inplace = (prog == "sed" and any(w.startswith("-i") or w.startswith("--in-place") for w in words[1:])) \
