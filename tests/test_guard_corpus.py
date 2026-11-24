@@ -234,7 +234,44 @@ CD_UNKNOWN = (
     ]]
 )
 
-CASES = BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN
+# How a shell is told where its commands come from: -c script, stdin, or a file.
+SHELL_ARGV = (
+    [("dev", c, "block") for c in [
+        "echo 'git push' | bash -es",
+        "echo 'git push' | bash -s -- a",
+        "echo 'git push' | bash -",
+        "echo 'git push' | bash /dev/stdin",
+        "echo 'git push' | bash /dev/fd/0",
+        "echo 'git push' | sh -o pipefail",
+        "echo 'git push' | bash -O extglob",
+        "echo 'git push' | bash +x",
+        "echo 'git push' | bash --norc",
+        "bash -s script.sh",
+        "bash -o pipefail",
+        "bash --rcfile x -c 'git push'",
+        "bash -o pipefail -c 'git push'",
+        "bash +o pipefail -c 'git push'",
+        "bash -O extglob -c 'git push'",
+        "bash +x -c 'git push'",
+        "bash -e -c -- 'git push'",
+        "bash -o pipefail -c 'rm -rf /'",
+        "bash -o pipefail -c",
+        "bash -c -o",
+        "source /dev/stdin",
+    ]]
+    + [("dev", c, "allow") for c in [
+        "bash -o pipefail scripts/run.sh",
+        "bash -O extglob -c 'npm test'",
+        "bash +x scripts/run.sh",
+        "bash -o pipefail -c 'npm test'",
+        "bash --norc scripts/run.sh",
+        "bash -e scripts/run.sh arg",
+        "bash -o pipefail <<< 'npm test'",
+        "source scripts/env.sh",
+    ]]
+)
+
+CASES = BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
 
 
 def make_project(base: Path) -> Path:

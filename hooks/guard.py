@@ -584,6 +584,45 @@ def next_dir(words: list[str], cur: str | None, dirs: list) -> str | None:
     return None if joined is None else os.path.normpath(joined)
 
 
+STDIN_PATHS = {"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}
+SHELL_OPT_WITH_ARG = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+
+
+def shell_input(prog: str, args: list[str]) -> tuple[str, str | None]:
+    """Where a shell gets its commands: ("script", text) for -c, ("stdin", None), or ("file", None)."""
+    if prog in {"source", "."}:
+        return ("stdin", None) if args[:1] and args[0] in STDIN_PATHS else ("file", None)
+    i, c_flag, s_flag = 0, False, False
+    while i < len(args):
+        w = args[i]
+        if w == "--":
+            i += 1
+            break
+        if w == "-":
+            break
+        if w.startswith("--"):
+            i += 2 if w in SHELL_OPT_WITH_ARG else 1
+        elif w[0] in "-+" and len(w) > 1:
+            if w[0] == "-":
+                c_flag = c_flag or "c" in w[1:]
+                s_flag = s_flag or "s" in w[1:]
+            if w[-1] in "oO":
+                if i + 1 >= len(args):
+                    raise Blocked(f"`{prog} {w}` is missing its value; can't tell what it runs")
+                i += 1
+            i += 1
+        else:
+            break
+    operands = args[i:]
+    if c_flag:
+        if not operands:
+            raise Blocked(f"`{prog} -c` without a script can't be checked")
+        return "script", operands[0]
+    if s_flag or not operands or operands[0] in STDIN_PATHS:
+        return "stdin", None
+    return "file", None
+
+
 def check_find(args: list[str], root: str, role: str, depth: int, cur: str | None) -> None:
     """`find -delete` is an rm -r over the start points; `-exec CMD {} ;` runs CMD on them."""
     i = 0
@@ -619,18 +658,14 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
     if prog == "eval":
         check_bash(" ".join(words[1:]), root, role, depth + 1, cur)
         return
-    if prog in SHELLS:
-        idx = next((i for i, w in enumerate(words[1:], 1) if re.match(r"^-[a-zA-Z]*c[a-zA-Z]*$", w)), None)
-        if idx is not None:
-            script = next((w for w in words[idx + 1:] if not w.startswith("-")), None)
-            if script is None:
-                raise Blocked(f"`{prog} -c` without a script can't be checked")
+    if prog in SHELLS or prog in {"source", "."}:
+        mode, script = shell_input(prog, words[1:])
+        if mode == "script":
             check_bash(script, root, role, depth + 1, cur)
-        elif not any(not w.startswith("-") for w in words[1:]):
-            fed = seg is not None and (seg.heredocs or seg.herestrings)
-            if not fed:
+        elif mode == "stdin":
+            if seg is None or not (seg.heredocs or seg.herestrings):
                 raise Blocked(f"`{prog}` reading commands from stdin can't be checked; pass a script file or use -c")
-            for text in (seg.herestrings if seg else []):
+            for text in seg.herestrings:
                 check_bash(text, root, role, depth + 1, cur)
     if prog == "find":
         check_find(words[1:], root, role, depth, cur)
