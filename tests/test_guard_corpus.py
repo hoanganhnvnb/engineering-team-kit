@@ -878,8 +878,42 @@ GIT_RUNS_PROGRAMS = (
     ]]
 )
 
+# R1-13: protected_paths from .claude/engineering-team.json (fixture: db/migrations/, infra/**, LICENSE, src/legacy/*.js)
+PROTECTED = (
+    [(r, c, "block") for r in ("dev", "qa") for c in [
+        "echo x > db/migrations/001.sql",
+        "rm db/migrations/001.sql",
+        "rm -rf db/migrations",
+        "cp x infra/main.tf",
+        "mv x infra/modules/a.tf",
+        "tee LICENSE",
+        "sed -i s/a/b/ LICENSE",
+        "cd db && rm migrations/001.sql",
+        "touch infra/new.tf",
+        "git rm db/migrations/001.sql",
+        "echo x > src/legacy/a.js",
+        "find db/migrations -delete",
+        "cp -t infra x.tf",
+        "perl -pi -e s/a/b/ infra/a.tf",
+        "dd if=x of=LICENSE",
+        "echo x > ./infra/../LICENSE",
+        "timeout 5 tee LICENSE",
+        "find . -fprint LICENSE",
+        "cd $X && echo x > LICENSE",
+    ]]
+    + [("dev", c, "allow") for c in [
+        "echo x > src/a.js",
+        "cat LICENSE",
+        "cp LICENSE /tmp/etk-LICENSE",
+        "echo x > src/legacy/sub/a.ts",
+        "ls db/migrations",
+        "git diff db/migrations",
+        "echo x > docs/LICENSE.md",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED)
 
 
 def make_project(base: Path) -> Path:
@@ -894,6 +928,9 @@ def make_project(base: Path) -> Path:
     (base / "tests" / "existing.test.js").write_text("t\n")
     (base / "README.md").write_text("r\n")
     os.symlink("/dev/stdin", base / "stdin-link")
+    (base / ".claude").mkdir()
+    (base / ".claude" / "engineering-team.json").write_text(json.dumps(
+        {"protected_paths": ["db/migrations/", "infra/**", "LICENSE", "src/legacy/*.js"]}))
     run("git", "add", "-A")
     run("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init")
     run("git", "branch", "feature")
@@ -943,6 +980,22 @@ class GuardCorpus(unittest.TestCase):
                 self.assertEqual("block" if guard.decide(data) is not None else "allow", want)
         data = {"tool_name": "mcp__github__push_files", "tool_input": {}, "cwd": str(self.project)}
         self.assertIsNone(guard.decide(data), "main session is not guarded")
+
+    def test_protected_paths_apply_to_write_tools(self):
+        for role in ROLES:
+            for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+                for path in ("db/migrations/002.sql", "infra/a/b.tf", "LICENSE", str(self.project / "LICENSE"),
+                             "src/legacy/old.js"):
+                    key = "notebook_path" if tool == "NotebookEdit" else "file_path"
+                    data = {"tool_name": tool, "tool_input": {key: path}, "cwd": str(self.project),
+                            "agent_type": ROLES[role]}
+                    with self.subTest(role=role, tool=tool, path=path):
+                        self.assertIsNotNone(guard.decide(data))
+        data = {"tool_name": "Write", "tool_input": {"file_path": "db/migrations/002.sql"}, "cwd": str(self.project)}
+        self.assertIsNone(guard.decide(data), "main session is not guarded")
+        data = {"tool_name": "Write", "tool_input": {"file_path": "src/new.js"}, "cwd": str(self.project),
+                "agent_type": ROLES["dev"]}
+        self.assertIsNone(guard.decide(data))
 
     def test_hook_matcher_covers_mcp_tools(self):
         hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())

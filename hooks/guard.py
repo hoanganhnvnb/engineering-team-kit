@@ -535,6 +535,7 @@ def check_checkout(rest: list[str], cwd: str) -> None:
 
 
 def check_git(args: list[str], cwd: str, cur: str | None) -> None:
+    root = cwd
     i = 0
     while i < len(args) and args[i].startswith("-"):
         if args[i] == "-C" and i + 1 < len(args):
@@ -564,6 +565,10 @@ def check_git(args: list[str], cwd: str, cur: str | None) -> None:
             raise Blocked("`git rm` with -r/-f or a broad pathspec deletes work from the tree")
     if sub == "checkout":
         check_checkout(rest, cwd)
+    if sub in {"rm", "mv", "restore", "apply", "checkout"}:
+        for w in rest:
+            if not w.startswith("-"):
+                check_protected(w, root, cur)
     if sub == "restore" and not (has("--staged", "-S") and not has("--worktree", "-W")):
         raise Blocked("git restore discards uncommitted changes")
     if sub == "switch" and has("-f", "--force", "--discard-changes"):
@@ -920,8 +925,69 @@ def check_find(args: list[str], root: str, role: str, depth: int, cur: str | Non
             check_words(words, root, role, depth + 1, cur, None, outputs)
 
 
+def load_protected(root: str) -> list[str]:
+    """`protected_paths` from <cwd>/.claude/engineering-team.json (a missing or unreadable file protects nothing)."""
+    try:
+        with open(os.path.join(root, ".claude", "engineering-team.json")) as f:
+            value = json.load(f).get("protected_paths")
+    except (OSError, ValueError, AttributeError):
+        return []
+    if isinstance(value, str):
+        value = [value]
+    return [v for v in value if isinstance(v, str) and v.strip()] if isinstance(value, list) else []
+
+
+def glob_regex(pattern: str) -> re.Pattern:
+    out, i = "", 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out, i = out + "(?:.*/)?", i + 3
+        elif pattern.startswith("**", i):
+            out, i = out + ".*", i + 2
+        elif pattern[i] == "*":
+            out, i = out + "[^/]*", i + 1
+        elif pattern[i] == "?":
+            out, i = out + "[^/]", i + 1
+        else:
+            out, i = out + re.escape(pattern[i]), i + 1
+    return re.compile(out + r"\Z")
+
+
+def is_protected(path: str, root: str, cur: str | None) -> bool:
+    patterns = load_protected(root)
+    if not patterns:
+        return False
+    full = absjoin(path, cur)
+    if full is None:
+        return True  # can't tell where a relative path lands, and something here is protected
+    real_root = os.path.realpath(root)
+    rel = os.path.relpath(os.path.realpath(full), real_root).replace(os.sep, "/")
+    if rel == ".." or rel.startswith("../"):
+        return False
+    parts = rel.split("/")
+    prefixes = ["/".join(parts[:n]) for n in range(1, len(parts) + 1)]
+    for pat in patterns:
+        pat = pat.strip()
+        while pat.startswith("./"):
+            pat = pat[2:]
+        pat = pat.rstrip("/")
+        if pat in {"", "."}:
+            return True
+        for variant in {pat, pat[:-3] if pat.endswith("/**") else pat}:  # `dir/**` protects `dir` itself too
+            rx = glob_regex(variant)
+            if any(rx.match(pre) for pre in prefixes):
+                return True
+    return False
+
+
+def check_protected(path: str, root: str, cur: str | None) -> None:
+    if is_protected(path, root, cur):
+        raise Blocked(f"`{path}` is listed in protected_paths (.claude/engineering-team.json); ask the user first")
+
+
 def check_write_target(target: str, role: str, root: str, cur: str | None) -> None:
     """A file a redirect (or `time -o`) will write."""
+    check_protected(target, root, cur)
     if is_secret(target):
         raise Blocked(f"writing to `{target}` (looks like a secrets file)")
     if role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES:
@@ -992,6 +1058,12 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
     for t in targets:
         if is_secret(t):
             raise Blocked(f"writing to `{t}` (looks like a secrets file)")
+    if prog in SHELL_WRITERS:
+        for t in write_operands(prog, words[1:]) + targets:
+            check_protected(t, root, cur)
+    else:
+        for t in targets:
+            check_protected(t, root, cur)
     if prog == "git":
         check_git(words[1:], root, cur)
     if prog == "rm":
@@ -1278,6 +1350,7 @@ def decide(data: dict) -> str | None:
             check_mcp(tool)
         elif tool in {"Write", "Edit", "MultiEdit", "NotebookEdit"}:
             path = str(inp.get("file_path") or inp.get("notebook_path") or "")
+            check_protected(path, cwd, cwd)
             if is_secret(path):
                 raise Blocked(f"writing `{path}` (looks like a secrets file); edit the .example version instead")
             if role in DOCS_ONLY_ROLES and not path.lower().endswith((".md", ".mdx")):
