@@ -25,9 +25,10 @@ Record each phase change with `etk.sh run phase <name> RUN`. `RUN` is the direct
 `run init` printed. Pass it to every ledger command.
 
 1. **intake**
-   - "tiếp tục" / "continue" with an `IN_PROGRESS` run in the snapshot: open that
-     ledger and resume from its `phase`. Re-confirm any authorization it carries
-     before you rely on it.
+   - "tiếp tục" / "continue": run `etk.sh run latest`, then `etk.sh run render <that
+     dir>` and read its **Outcome** and **Phase**. If the outcome is `IN_PROGRESS`,
+     resume that run from its phase. Re-confirm any authorization it carries before
+     you rely on it.
    - Otherwise:
      - If the snapshot's Workflow profile block says `missing`, follow
        `${CLAUDE_PLUGIN_ROOT}/workflows/profile.md`.

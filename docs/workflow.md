@@ -41,8 +41,8 @@ is hit, or when a hook, CI or deploy fails. Nothing is pushed while gates are fa
 
 Each developer has their own profile for each project: how you commit, push, integrate
 and deploy. It is stored in the plugin's data folder
-(`~/.claude/plugins/data/<plugin>/projects/<key>/profile.json`), keyed by the repo's
-`origin` URL. That folder is outside every repo, so the profile can't be committed. It
+(`~/.claude/plugins/data/engineering-team-engineering-team-kit/projects/<key>/profile.json`),
+keyed by the repo's `origin` URL. That folder is outside every repo, so the profile can't be committed. It
 survives plugin updates. It is deleted when you uninstall the plugin, unless you pass
 `--keep-data`.
 
@@ -56,8 +56,8 @@ To change a habit, just say it ("từ giờ tạo PR thay vì merge thẳng"). T
 that field and tells you. To see or reset the profile:
 
 ```bash
-sh <plugin>/scripts/etk.sh profile show --brief --data ~/.claude/plugins/data/<plugin>
-sh <plugin>/scripts/etk.sh profile path --data ~/.claude/plugins/data/<plugin>   # delete this file to reset
+sh <plugin>/scripts/etk.sh profile show --brief --data ~/.claude/plugins/data/engineering-team-engineering-team-kit
+sh <plugin>/scripts/etk.sh profile path --data ~/.claude/plugins/data/engineering-team-engineering-team-kit   # delete this file to reset
 ```
 
 ## Who may do what

@@ -177,8 +177,9 @@ For long tasks the Lead keeps short notes in `docs/agent/CURRENT_STATE.md` and
 branches always needs a yes from you. It never force-pushes or skips hooks.
 
 **Where is my profile, and can my team see it?** It's in
-`~/.claude/plugins/data/<plugin>/projects/<key>/profile.json`, on your machine only.
-Run `etk.sh profile path` to find it. Delete the file to reset.
+`~/.claude/plugins/data/engineering-team-engineering-team-kit/projects/<key>/profile.json`, on your machine only.
+To find it, run the plugin's `scripts/etk.sh profile path --data ~/.claude/plugins/data/engineering-team-engineering-team-kit`.
+Delete the file to reset.
 
 **Does it work without GitHub?** Yes. GitLab uses `glab`. With Bitbucket, or without a
 signed-in CLI, you get the PR link to open yourself. SVN gets commits only. With no VCS,

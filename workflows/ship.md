@@ -79,7 +79,9 @@ etk run authorize --action deploy --target staging --source prompt \
 - `integrate: merge`: only with merge permission, using `merge.method`, after CI if
   `wait_ci` is set. Delete the branch only if `merge.delete_branch` is set.
 - Tag only when a deploy target is `ci-on-tag` or the user asked. Pick the version
-  per SemVer from the change.
+  per SemVer from the change. A tag needs its own permission in the user's words
+  (`authorize --action tag`): for a `ci-on-tag` target, the deploy permission counts
+  only if it also says release or tag. Otherwise ask at the planning gate.
 - Record each step with `etk run act --action push|pr|merge|tag --target … --ref …
   --url … --exit <code> RUN`.
 
