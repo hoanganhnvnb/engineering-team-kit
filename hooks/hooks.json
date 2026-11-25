@@ -1,9 +1,9 @@
 {
-  "description": "Seatbelt for engineering-team subagents: blocks push/deploy/destructive git and secret files. No effect on the main session or other plugins.",
+  "description": "Seatbelt for engineering-team subagents: blocks push/deploy/destructive git, secret files and write-style MCP tools. No effect on the main session or other plugins.",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
         "hooks": [
           {
             "type": "command",

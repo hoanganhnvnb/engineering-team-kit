@@ -1234,6 +1234,23 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             cur, dirs[:] = None, ["?"]  # whatever it did to the directory isn't visible to us
 
 
+# Browser tools act on pages, not on the project; everything else is judged by what its name says it does.
+MCP_BROWSER = re.compile(r"^mcp__(claude-in-chrome|[\w-]*playwright[\w-]*)__")
+MCP_WRITE_VERBS = {"push", "merge", "create", "delete", "write", "update", "publish", "deploy", "remove", "edit",
+                   "commit", "upload", "send", "post", "promote", "put", "patch", "insert", "add", "set", "move",
+                   "rename", "resolve", "reopen"}
+
+
+def check_mcp(tool: str) -> None:
+    if MCP_BROWSER.match(tool):
+        return
+    name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", tool.split("__")[-1]).lower()
+    verbs = MCP_WRITE_VERBS & set(re.split(r"[_\-\s]+", name))
+    if verbs:
+        raise Blocked(f"MCP tool `{tool}` looks like it changes something outside the project ({sorted(verbs)[0]}); "
+                      f"the user decides that")
+
+
 def decide(data: dict) -> str | None:
     """Reason to block this tool call, or None to allow it."""
     agent = str(data.get("agent_type") or "")
@@ -1246,6 +1263,8 @@ def decide(data: dict) -> str | None:
     try:
         if tool == "Bash":
             check_bash(str(inp.get("command", "")), cwd, role)
+        elif isinstance(tool, str) and tool.startswith("mcp__"):
+            check_mcp(tool)
         elif tool in {"Write", "Edit", "MultiEdit", "NotebookEdit"}:
             path = str(inp.get("file_path") or inp.get("notebook_path") or "")
             if is_secret(path):

@@ -64,6 +64,13 @@ Honest list. If one of these bites you, an issue is welcome.
   blocks rather than guesses, but it can't promise to catch everything. Real isolation
   needs OS-level controls: a container or VM, a read-only mount or separate user for the
   read-only roles, and credentials that can't push or deploy.
+- **MCP tools are judged by name only.** For the plugin's subagents the guard blocks MCP
+  tools whose name contains a write-style word (`push`, `merge`, `create`, `delete`,
+  `write`, `update`, `publish`, `deploy` and a few more), and lets browser tools
+  (`mcp__claude-in-chrome__*`, Playwright) through. A tool with a neutral name that
+  changes things anyway (`mcp__x__run`, `mcp__x__execute`) passes, and so does anything a
+  browser tool does on a page (submitting a form on a deploy dashboard). Only permissions
+  you set in Claude Code, or leaving the server out of the session, close that gap.
 - **It judges the filesystem as it is before the command runs.** A script created earlier
   in the same command line (`ln -s /dev/stdin x && bash x`) is blocked when the guard can
   see it being created. A script or link made by an earlier tool call, or by a program the

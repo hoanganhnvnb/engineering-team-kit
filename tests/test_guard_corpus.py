@@ -870,6 +870,19 @@ def make_project(base: Path) -> Path:
     return base
 
 
+# R1-9: MCP tools. (role, tool name, verdict)
+MCP_CASES = [(r, t, "block") for r in ("dev", "rev", "qa") for t in [
+    "mcp__github__create_pull_request", "mcp__github__merge_pull_request", "mcp__github__push_files",
+    "mcp__x__deleteFile", "mcp__x__write_file", "mcp__x__update_issue", "mcp__plugin_x__publish_page",
+    "mcp__LitGroup_Preview__deploy_mockup", "mcp__claude_ai_Claude_Docs__update",
+]] + [(r, t, "allow") for r in ("dev", "rev", "qa") for t in [
+    "mcp__github__get_file_contents", "mcp__github__list_issues", "mcp__github__search_code",
+    "mcp__claude-in-chrome__navigate", "mcp__claude-in-chrome__computer", "mcp__claude-in-chrome__form_input",
+    "mcp__playwright__browser_click", "mcp__plugin_playwright_playwright__browser_navigate",
+    "mcp__claude-vscode__getDiagnostics",
+]]
+
+
 class GuardCorpus(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -892,6 +905,19 @@ class GuardCorpus(unittest.TestCase):
             self.assertEqual(self.verdict("dev", "cd src && rm -rf build"), "block")
             self.assertEqual(self.verdict("dev", "cd ./src && rm -rf build"), "allow")
             self.assertEqual(self.verdict("dev", "cd /tmp && rm -rf scratch"), "allow")
+
+    def test_mcp_tools(self):
+        for role, tool, want in MCP_CASES:
+            with self.subTest(role=role, tool=tool):
+                data = {"tool_name": tool, "tool_input": {}, "cwd": str(self.project), "agent_type": ROLES[role]}
+                self.assertEqual("block" if guard.decide(data) is not None else "allow", want)
+        data = {"tool_name": "mcp__github__push_files", "tool_input": {}, "cwd": str(self.project)}
+        self.assertIsNone(guard.decide(data), "main session is not guarded")
+
+    def test_hook_matcher_covers_mcp_tools(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        matcher = hooks["hooks"]["PreToolUse"][0]["matcher"]
+        self.assertIn("mcp__.*", matcher.split("|"))
 
     def test_corpus(self):
         for role, cmd, want in CASES:
