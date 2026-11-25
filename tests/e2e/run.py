@@ -2,7 +2,7 @@
 """Run one end-to-end scenario against a throwaway copy of a fixture.
 
     python3 tests/e2e/run.py <fixture> "<slash command + args>" [--out DIR] [--check "<cmd>"]
-                             [--model M] [--overlay NAME] [--keep] [--bypass]
+                             [--model M] [--overlay NAME] [--keep] [--bypass] [--ship]
 
 What it does:
   1. copies tests/fixtures/<fixture> to a temp dir, `git init` + commit (clean baseline)
@@ -11,6 +11,11 @@ What it does:
      check, and (optionally) re-runs the project's tests itself instead of trusting
      the transcript
   4. writes transcript.jsonl + summary.json to --out
+
+--ship sets the project up for the release flow: a local bare repo as `origin`, a
+`deploy.sh` that writes a marker next to the project, and a workflow profile (push auto,
+no PR, one staging target) in the data dir Claude Code uses for --plugin-dir plugins.
+The summary then shows what reached origin and whether the deploy ran.
 
 This spends real model tokens. By default it runs with acceptEdits and a short
 shell allowlist (ALLOWED_TOOLS); commands outside it are denied, which can make a
@@ -32,6 +37,21 @@ REPO = Path(__file__).resolve().parents[2]
 FIXTURES = REPO / "tests" / "fixtures"
 ETK_SCRIPT = REPO / "scripts" / "etk_run.py"
 ETK_SH = REPO / "scripts" / "etk.sh"
+ETK_PROFILE = REPO / "scripts" / "etk_profile.py"
+# Claude Code's data dir for a plugin loaded with --plugin-dir.
+INLINE_DATA = Path.home() / ".claude" / "plugins" / "data" / "engineering-team-inline"
+SHIP_PROFILE = {
+    "vcs": {"type": "git"}, "branches": {"model": "trunk", "default": "main"},
+    "commit": {"style": "conventional", "language": "en"},
+    "release": {"commit": "auto", "push": "auto", "integrate": "none", "wait_ci": False},
+    "deploy": {"targets": [{"name": "staging", "production": False, "kind": "command",
+                            "command": "sh deploy.sh", "verify": "test -f ../deployed.txt"}]},
+}
+SHIP_TOOLS = ["Bash(git push:*)", f'Bash(sh "{ETK_SH}" exec:*)', f"Bash(sh {ETK_SH} exec:*)",
+              f'Bash(sh "{ETK_SH}" profile:*)', f"Bash(sh {ETK_SH} profile:*)",
+              f'Bash(sh "{ETK_SH}" discover:*)', f"Bash(sh {ETK_SH} discover:*)",
+              "Bash(git checkout -b:*)", "Bash(git switch -c:*)", "Bash(echo:*)", "Bash(sh deploy.sh)",
+              "Bash(test -f ../deployed.txt)"]
 ALLOWED_TOOLS = [
     # Narrow, fixed prefixes only: no bare interpreters, no find -exec, no arbitrary npm scripts.
     # This limits accidents. It is NOT an isolation boundary: a test file the agent writes
@@ -64,6 +84,7 @@ def main() -> int:
     ap.add_argument("--keep", action="store_true", help="keep the temp project dir")
     ap.add_argument("--overlay", default=None,
                     help="dir under tests/fixtures/overlays copied over the project after the baseline commit")
+    ap.add_argument("--ship", action="store_true", help="local origin + deploy marker + a ship profile")
     ap.add_argument("--bypass", action="store_true",
                     help="run with --permission-mode bypassPermissions. The agent can then run ANY command "
                          "as you, not only inside the temp dir. Use only in a disposable VM/container.")
@@ -77,10 +98,29 @@ def main() -> int:
 
     work = Path(tempfile.mkdtemp(prefix=f"etk-{a.fixture}-")) / a.fixture
     shutil.copytree(src, work)
+    if a.ship:
+        (work / "deploy.sh").write_text("#!/bin/sh\n# e2e stand-in for a deploy: leave a marker beside the project\n"
+                                        "date > ../deployed.txt\n")
     sh(["git", "init", "-q", "-b", "main"], work)
     sh(["git", "add", "-A"], work)
     sh(["git", "-c", "user.email=e2e@example.com", "-c", "user.name=e2e", "commit", "-q", "-m", "fixture baseline"], work)
 
+    profile_path = None
+    if a.ship:
+        origin = work.parent / "origin.git"
+        sh(["git", "init", "-q", "--bare", "-b", "main", str(origin)], work)
+        sh(["git", "remote", "add", "origin", str(origin)], work)
+        sh(["git", "push", "-q", "-u", "origin", "main"], work)
+        INLINE_DATA.mkdir(parents=True, exist_ok=True)
+        r = sh([sys.executable, str(ETK_PROFILE), "path", "--data", str(INLINE_DATA)], work)
+        profile_path = Path(r.stdout.strip())
+        profile_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        profile_path.write_text(json.dumps({"schema": 1, **SHIP_PROFILE}, indent=2))
+        # Bind it to this checkout and push URL, as onboarding would; an unbound profile's
+        # `auto` settings don't count.
+        r = sh([sys.executable, str(ETK_PROFILE), "confirm", "--data", str(INLINE_DATA)], work)
+        if r.returncode:
+            raise SystemExit(f"profile confirm failed: {r.stderr}")
     if a.overlay:
         shutil.copytree(FIXTURES / "overlays" / a.overlay, work, dirs_exist_ok=True)
     cmd = ["claude", "-p", a.prompt, "--plugin-dir", str(REPO), "--output-format", "stream-json", "--verbose"]
@@ -89,7 +129,7 @@ def main() -> int:
         cmd += ["--permission-mode", "bypassPermissions"]
     else:
         # File edits are auto-accepted; shell access is limited to what the scenarios need.
-        cmd += ["--permission-mode", "acceptEdits", "--allowedTools", *ALLOWED_TOOLS]
+        cmd += ["--permission-mode", "acceptEdits", "--allowedTools", *ALLOWED_TOOLS, *(SHIP_TOOLS if a.ship else [])]
     if a.model:
         cmd += ["--model", a.model]
     started = time.time()
@@ -135,17 +175,27 @@ def main() -> int:
         r = sh(a.check, work, shell=True)
         check = {"cmd": a.check, "exit_code": r.returncode, "tail": (r.stdout + r.stderr)[-1500:]}
 
+    ship = None
+    if a.ship:
+        base = sh(["git", "--git-dir", str(work.parent / "origin.git"), "log", "--format=%h %s", "main"], work)
+        ship = {"origin_log": base.stdout.strip().splitlines()[:10],
+                "pushed": len(base.stdout.strip().splitlines()) > 1,
+                "deployed": (work.parent / "deployed.txt").exists(),
+                "local_ahead": sh(["git", "rev-list", "--count", "origin/main..HEAD"], work).stdout.strip()}
+        if profile_path:
+            shutil.rmtree(profile_path.parent, ignore_errors=True)
+
     summary = {
         "fixture": a.fixture, "prompt": a.prompt, "exit_code": proc.returncode, "seconds": elapsed,
         "cost_usd": cost, "subagents": agents, "skills": skills, "lead_bash": bash,
         "diff_stat": diff_stat, "untracked": untracked,
         "ledger_check": {"exit_code": ledger.returncode, "output": ledger.stdout.strip()[-1500:]},
-        "independent_check": check, "workdir": str(work) if a.keep else None,
+        "independent_check": check, "ship": ship, "workdir": str(work) if a.keep else None,
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     (out / "report.md").write_text(final + "\n\n---\n\n## Ledger render\n\n" + render.stdout)
     print(json.dumps({k: summary[k] for k in ("fixture", "exit_code", "seconds", "cost_usd", "subagents", "skills",
-                                              "diff_stat", "untracked", "ledger_check", "independent_check")}, indent=2))
+                                              "diff_stat", "untracked", "ledger_check", "independent_check", "ship")}, indent=2))
     print(f"\nresults: {out}")
     if not a.keep:
         shutil.rmtree(work.parent, ignore_errors=True)
