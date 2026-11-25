@@ -1,121 +1,156 @@
+<div align="center">
+
 # Engineering Team Kit
+
+A Claude Code plugin that implements a change, has it reviewed independently, tests until it really passes, and ships only as far as you allow.
+
+[Quick start](#quick-start) · [Commands](#commands) · [How it works](#how-it-works) · [Documentation](#documentation) · [Contributing](#contributing)
 
 [![CI](https://github.com/hoanganhnvnb/engineering-team-kit/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/hoanganhnvnb/engineering-team-kit/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/hoanganhnvnb/engineering-team-kit)](https://github.com/hoanganhnvnb/engineering-team-kit/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
-![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange)
 
-**A small AI engineering team for Claude Code: it implements, gets an independent review,
-tests until it really passes, and ships only as far as you allow.**
+</div>
 
-One request in any project:
+## Overview
 
-```text
-fix the cart total rounding bug; when review and tests pass, commit, push and deploy staging
-```
+Asking a coding agent to "fix it and push" gets you code that was reviewed by the same
+context that wrote it, tests that were assumed to pass, and a push you didn't scope.
+Engineering Team Kit makes the main Claude session a **Lead** that runs a small team:
+a developer, an independent reviewer, and QA and UX reviewers when they're worth the cost.
 
-The main Claude session becomes the **Lead**. It reads your project's rules, sizes the
-task, and hands the work to a **developer**. An independent **reviewer** checks it,
-with **QA** and **UX** when they're worth the cost. The Lead loops on real findings
-until gates G1–G6 pass, and every "passed" is backed by a command and its exit code.
-Then it commits, pushes, opens the PR and deploys, following your own
-[workflow profile](docs/workflow.md) and the permission you gave in that request.
+- **Independent review.** The reviewer sees the diff and the acceptance criteria, never
+  the developer's summary, and can't edit files.
+- **Evidence for every "passed".** Each gate needs written evidence, and the test and
+  regression gates need a recorded command and exit code. A PASS without it fails
+  `etk run check`.
+- **Shipping on your terms.** Commit and push follow your own workflow profile. Merge
+  and deploy need your words in the conversation, and production must be named.
+- **Your project's rules win.** CLAUDE.md, rules, skills and CI come first.
 
-Built for solo developers and small teams. Most tasks stay small and cheap, and the
-process scales up only when the change does. Installed, it adds about 600 tokens to a
-session; the workflows load only when used.
+It is built for solo developers and small teams working in git repositories.
 
-## Quick start (60 seconds)
+## Quick start
 
-Requires Claude Code with plugin support (built and tested on 2.1.329) and Python 3.12+.
+Requirements: Claude Code with plugin support (built and tested on 2.1.329), `git` (SVN
+gets commits only), and Python 3.12+ (found automatically; see [docs/install.md](docs/install.md) if it isn't).
 
 ```bash
 claude plugin marketplace add hoanganhnvnb/engineering-team-kit
 claude plugin install engineering-team@engineering-team-kit
 ```
 
-Restart Claude Code, open a project, and ask for something:
+Restart Claude Code, open a project and ask for something:
 
 ```text
 add CSV export to the orders report; open a PR once review passes
 ```
 
-On the first run in a project, Claude detects your git host, branches and commit style,
-asks once about what it can't detect (PR or direct merge, how you deploy), and saves the
-answers to your own profile, outside the repo. More in [docs/install.md](docs/install.md).
+On the first run in a project, the plugin detects your git host, branches and commit
+style, asks only what it can't detect (PR or direct merge, how you deploy), and
+saves the answers to a profile outside the repository.
 
 ![A team run: plan, review, tests, commit, push, deploy](docs/assets/demo.gif)
 
-## Why not just prompt Claude?
-
-| | Plain prompt | Engineering Team Kit |
-|---|---|---|
-| Review | The context that wrote the code | A fresh reviewer that sees only the diff and the acceptance criteria |
-| "Tests pass" | Taken on trust | Each command and exit code is recorded; a PASS without evidence fails the check |
-| Shipping | Whenever asked | Only this run's files, after the gates pass; merge and deploy need your words |
-| Subagents | Can do anything you can | A guard hook keeps them from pushing, deploying or touching secrets |
-
 ## Commands
+
+You can also just ask; Claude starts `team` for build, fix, ship and deploy requests.
 
 | Command | What it does |
 |---|---|
-| `/engineering-team:team <task>` (or just ask) | Implement → review → test/fix until pass → commit, push, PR, deploy as you allow |
+| `/engineering-team:team <task>` | Implement, review, test and fix until it passes, then commit, push, PR and deploy as you allow |
 | `/engineering-team:build <feature>` | Feature loop up to the gates and a report |
 | `/engineering-team:fix <bug>` | Failing test first, root-cause fix, no regressions |
 | `/engineering-team:review [ref\|PR\|path] [--fix]` | Independent read-only review; `--fix` runs the fix loop |
 | `/engineering-team:test [scope\|regression]` | QA pass: real suites, edge cases, new vs pre-existing failures |
 | `/engineering-team:improve-ui <screen>` | Before/after UX review in a browser, then fix and re-verify |
 | `/engineering-team:retro [last N]` | Recurring findings and the checks worth adding |
+| `/engineering-team:readme [focus]` | Audit and redesign the README against the real repository |
+
+Only `team` can be started by Claude on its own; the others run when you type them.
 
 ## How it works
 
-```
- request → Lead: discover → acceptance criteria → size S / M / L
-             small: Lead alone │ medium: developer ⇄ reviewer (+QA, +UX) │ large: parallel worktrees
-                           gates G1–G6 in a ledger → `etk run check` → release (G7) → report
+```mermaid
+flowchart TD
+  A[Request] --> B["Lead: discover, criteria, size"]
+  B -->|small| C[Lead implements]
+  B -->|medium| D[Developer]
+  B -->|large| E["Parallel developers<br/>in git worktrees"]
+  D <--> F["Fresh reviewer<br/>(+ QA, + UX)"]
+  E --> F
+  C --> G["Gates G1-G6 in a ledger"]
+  F --> G
+  G --> H["etk run check, then release (G7)<br/>commit, push, PR, deploy"]
+  H --> J[Report]
 ```
 
-- **Independent review.** The reviewer never sees the developer's summary and can't edit
-  files. Each fix is verified by a fresh reviewer. ([review loop](workflows/review-loop.md))
-- **Gates with evidence.** Requirements, review, tests, regression, UI and security, each
-  backed by commands and exit codes. ([gates](quality/gates.md))
-- **Your project wins.** Its CLAUDE.md, rules, skills, CI and commands come first; agents
-  follow a small [conventions pack](docs/conventions.md) only where the project is silent.
-- **Seatbelt, not sandbox.** A hook keeps the plugin's subagents from pushing, deploying,
-  rewriting history or writing secrets. ([limitations](docs/limitations.md))
+- **Sizing.** One or two obvious files: the Lead does it. Real logic or anything
+  security-sensitive: developer plus independent reviewer. Several independent parts: a
+  contract first, then parallel developers. ([routing](workflows/routing.md))
+- **Review loop.** Findings go to a fresh developer and a fresh reviewer verifies the
+  fix, for up to `max_cycles` rounds (3 by default), then it escalates to you.
+  ([review loop](workflows/review-loop.md))
+- **Gates.** Requirements, review, tests, regression, UI and security, each PASS, FAIL,
+  BLOCKED, NOT_RUN or NOT_APPLICABLE with evidence. ([gates](quality/gates.md))
+- **Conventions.** Agents follow a small [conventions pack](docs/conventions.md) where
+  your project is silent.
+- **Seatbelt, not a sandbox.** A hook keeps the plugin's own subagents from pushing,
+  deploying, rewriting history or writing secrets. ([limitations](docs/limitations.md))
 
-Optional per-project settings (test commands, UI URL, invariants, protected paths) go in
-`.claude/engineering-team.json`: see [docs/configuration.md](docs/configuration.md).
+## Configuration
+
+Nothing is required. To pin commands, invariants, the UI URL or protected paths, add
+`.claude/engineering-team.json` to the project. See
+[docs/configuration.md](docs/configuration.md) and [the template](templates/engineering-team.json).
+Your own commit, push and deploy habits live in the per-developer profile described in
+[docs/workflow.md](docs/workflow.md).
 
 ## FAQ
 
-**Will it push to my main branch?** Only if your profile is trunk-based with push `auto`,
-or you asked. It never force-pushes or skips hooks.
+**Will it push to my main branch?** Only if your profile is trunk-based with push set to
+`auto`, or you asked. It never force-pushes or skips hooks.
 
-**Where is my profile?** On your machine only, in
-`~/.claude/plugins/data/engineering-team-engineering-team-kit/projects/`. Delete it to reset.
+**Without GitHub?** GitLab uses `glab`, Bitbucket gets a PR link, SVN gets commits only.
+With no VCS the release steps are skipped.
 
-**Without GitHub?** GitLab uses `glab`; Bitbucket gets a PR link; SVN gets commits only.
+**What does it cost?** A small fix took about a minute and under a dollar in the
+recorded runs; see [docs/validation.md](docs/validation.md).
 
-**Cost?** A small fix is about a minute and under a dollar. See [validation](docs/validation.md).
+## Documentation
 
-## Docs
+| | |
+|---|---|
+| [Install and upgrade](docs/install.md) | Pinning, team setup, rollback, missing Python |
+| [Workflow](docs/workflow.md) | Phases, the profile, who may do what |
+| [Usage](docs/usage.md) | Examples for each command |
+| [Configuration](docs/configuration.md) | Project config reference |
+| [Architecture](docs/architecture.md) | Components and design decisions |
+| [Validation](docs/validation.md) | End-to-end runs and results |
+| [Limitations](docs/limitations.md) | What it can't do, and the guard's limits |
 
-[Workflow](docs/workflow.md) · [Conventions](docs/conventions.md) · [Usage](docs/usage.md) ·
-[Configuration](docs/configuration.md) · [Architecture](docs/architecture.md) ·
-[Validation](docs/validation.md) · [Limitations](docs/limitations.md) · [Evals](evals/README.md)
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `skills/` | The slash commands the Lead runs |
+| `agents/` | Subagents: developer, code-reviewer, qa-engineer, ux-reviewer, scout, tech-writer |
+| `workflows/`, `quality/`, `conventions/` | Process, gates and conventions read on demand |
+| `hooks/`, `scripts/` | The guard hook, the run ledger, the profile and the launchers |
+| `tests/`, [`evals/`](evals/README.md) | Unit and structure tests; model-graded evals |
 
 ## Contributing
 
 ```bash
 git clone https://github.com/hoanganhnvnb/engineering-team-kit && cd engineering-team-kit
-bash scripts/selftest.sh        # manifests + unit/structure tests
+bash scripts/selftest.sh        # manifests + unit and structure tests
 claude --plugin-dir .           # try it
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues privately ([SECURITY.md](SECURITY.md)).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues privately
+([SECURITY.md](SECURITY.md)).
 
 ## License
 
-MIT
+[MIT](LICENSE)

@@ -164,6 +164,12 @@ class PluginStructure(unittest.TestCase):
                 self.assertIn(f"## {name}", usage)
         self.assertIn("/engineering-team:readme", changelog)
 
+    def test_readme_diagrams_stay_narrow(self):
+        """Mermaid on a phone: top-down, or a short left-to-right chain."""
+        readme = (ROOT / "README.md").read_text()
+        for block in re.findall(r"```mermaid\n(.*?)```", readme, flags=re.S):
+            self.assertRegex(block.splitlines()[0], r"flowchart (TD|TB)")
+
     def test_old_never_push_wording_is_gone(self):
         for path in [ROOT / "README.md", ROOT / "docs" / "configuration.md", ROOT / "docs" / "limitations.md",
                      ROOT / "quality" / "report-template.md", *(ROOT / "skills").glob("*/SKILL.md")]:
