@@ -1477,11 +1477,12 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
 MCP_BROWSER = re.compile(r"^mcp__(claude-in-chrome|[\w-]*chrome-devtools[\w-]*|[\w-]*playwright[\w-]*)__")
 MCP_WRITE_VERBS = {"push", "merge", "create", "delete", "write", "update", "publish", "deploy", "remove", "edit",
                    "commit", "upload", "send", "post", "promote", "put", "patch", "insert", "add", "set", "move",
-                   "rename"}
+                   "rename", "resolve", "reopen"}
+MCP_READ = re.compile(r"^mcp__([\w-]*context7[\w-]*)__(resolve-library-id|get-library-docs)$")
 
 
 def check_mcp(tool: str) -> None:
-    if MCP_BROWSER.match(tool):
+    if MCP_BROWSER.match(tool) or MCP_READ.match(tool):
         return
     name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", tool.split("__")[-1]).lower()
     verbs = MCP_WRITE_VERBS & set(re.split(r"[_\-\s]+", name))

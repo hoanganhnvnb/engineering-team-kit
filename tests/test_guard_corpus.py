@@ -1201,13 +1201,15 @@ MCP_CASES = [(r, t, "block") for r in ("dev", "rev", "qa") for t in [
     "mcp__github__create_pull_request", "mcp__github__merge_pull_request", "mcp__github__push_files",
     "mcp__x__deleteFile", "mcp__x__write_file", "mcp__x__update_issue", "mcp__plugin_x__publish_page",
     "mcp__LitGroup_Preview__deploy_mockup", "mcp__claude_ai_Claude_Docs__update",
+    "mcp__x__resolve_conflict", "mcp__x__reopen_issue",
 ]] + [(r, t, "allow") for r in ("dev", "rev", "qa") for t in [
     "mcp__github__get_file_contents", "mcp__github__list_issues", "mcp__github__search_code",
     "mcp__claude-in-chrome__navigate", "mcp__claude-in-chrome__computer", "mcp__claude-in-chrome__form_input",
     "mcp__playwright__browser_click", "mcp__plugin_playwright_playwright__browser_navigate",
     "mcp__claude-vscode__getDiagnostics",
     "mcp__context7__resolve-library-id", "mcp__context7__get-library-docs",
-    "mcp__plugin_context7_context7__resolve-library-id", "mcp__github__get_pull_request",
+    "mcp__plugin_context7_context7__resolve-library-id", "mcp__plugin_context7_context7__get-library-docs",
+    "mcp__github__get_pull_request",
     "mcp__sentry__get_issue_details", "mcp__linear__list_issues", "mcp__chrome-devtools__upload_file",
     "mcp__plugin_chrome-devtools-mcp_chrome-devtools__click",
 ]]
