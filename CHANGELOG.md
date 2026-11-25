@@ -3,6 +3,16 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
+## 0.5.2
+
+- **Security (guard):** a check that takes longer than 8 seconds now blocks with a message.
+  Claude Code lets a tool call through when a hook times out (the hook limit is 10 seconds).
+- **`team`:** a ledger is always opened, and `run check` must pass before any commit or push,
+  even for a one-line fix. In a re-run, the request that used to skip the ledger kept it in
+  3 of 3 runs.
+- **Docs:** an optional sandbox and `permissions.deny` snippet for a hard limit on
+  `~/.claude`, and the 0.5.1 end-to-end re-run in `docs/validation.md`.
+
 ## 0.5.1
 
 - **Security (guard):** hardening of the `~/.claude` and Python-folder protection added in 0.5.0.
