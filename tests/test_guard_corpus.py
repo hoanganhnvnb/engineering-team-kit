@@ -1143,8 +1143,27 @@ GIT_OTHER_OPTIONS = (
     + [("rev", c, "block") for c in ["git remote -v --foo", "git stash list --bogus"]]
 )
 
+# Read forms that read-only roles legitimately use.
+READ_ONLY_READS = (
+    [(r, c, "allow") for r in ("rev", "qa") for c in [
+        "git log -L 1,2:README.md",
+        "git log -L1,2:README.md",
+        "git show -L 1,2:README.md HEAD",
+        "git config user.name",
+    ]]
+    + [("rev", c, "allow") for c in [
+        "wget -qO- https://example.com",
+        "wget -O- https://example.com",
+        "wget -qO /tmp/etk-f https://example.com",
+    ]]
+    + [(r, c, "block") for r in ("rev", "qa") for c in ["git config user.name x", "git config --global user.name",
+                                                         "git -c color.ui=never log -1"]]
+    + [("rev", c, "block") for c in ["wget -qO out.txt https://example.com", "wget -qOout.txt https://example.com",
+                                     "wget -O out.txt https://example.com"]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES + ETK_EXEC_FORMS + GIT_OTHER_OPTIONS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES + ETK_EXEC_FORMS + GIT_OTHER_OPTIONS + READ_ONLY_READS)
 
 
 def make_project(base: Path) -> Path:

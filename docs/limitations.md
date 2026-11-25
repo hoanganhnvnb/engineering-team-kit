@@ -77,6 +77,9 @@ Honest list. If one of these bites you, an issue is welcome.
   changes things anyway (`mcp__x__run`, `mcp__x__execute`) passes, and so does anything a
   browser tool does on a page (submitting a form on a deploy dashboard). Only permissions
   you set in Claude Code, or leaving the server out of the session, close that gap.
+- **`git -c` is refused for the read-only roles and QA**, even for display-only keys like
+  `git -c color.ui=never log`: a `-c` can also set aliases and pagers that run programs, and
+  the guard can't tell them apart. Use `git log --no-color` or set the config in the repo.
 - **Known gaps in the guard** (found in review, not fixed):
   - `protected_paths` is matched against the paths a command names, so an operation on an
     ancestor (`rm -rf .`, moving a parent directory) isn't caught, and the match is

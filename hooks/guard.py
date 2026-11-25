@@ -1179,7 +1179,7 @@ _LOG = """--oneline --graph --decorate --no-decorate --all --branches --tags --r
 --children --parents --show-signature --notes --no-notes --source --use-mailmap --no-use-mailmap --encoding
 --log-size --relative-date --count --exclude --glob --not --no-walk --do-walk --full-history --sparse --dense
 --show-pulls --max-parents --min-parents --left-only --right-only --objects --header --timestamp
--n -i -E -F -P -g -m -c --decorate-refs --decorate-refs-exclude --bisect --stdin --remove-empty""".split()
+-n -i -E -F -P -g -m -c -L --decorate-refs --decorate-refs-exclude --bisect --stdin --remove-empty""".split()
 GIT_OPTION_ALLOW: dict = {}
 GIT_OPTION_ALLOW.update({
     "diff": set(_DIFF), "diff-tree": set(_DIFF) | {"-r", "-t", "--root", "--stdin", "--no-commit-id", "-c"},
@@ -1298,6 +1298,8 @@ def git_read_only_reason(args: list[str], qa: bool = False) -> str | None:
         return None
     if sub == "submodule" and rest[:1] in ([], ["status"], ["summary"]):
         return None
+    if sub == "config" and len(rest) == 1 and not rest[0].startswith("-"):
+        return None  # `git config user.name` only reads
     if sub == "config" and set(rest) & {"--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin"} \
             and not set(rest) & {"--add", "--unset", "--unset-all", "--replace-all", "--edit", "-e"}:
         return None
@@ -1359,9 +1361,11 @@ def read_only_extra_reason(words: list[str], root: str, cur: str | None) -> str 
                or (re.match(r"^-[a-zA-Z]+$", a) and ("O" in a or "T" in a)) for a in args):
             return "`curl -O`/`-T` writes or uploads files"
     if prog == "wget":
-        outs = [args[k + 1] for k, a in enumerate(args) if a in {"-O", "--output-document", "-P", "--directory-prefix"}
-                and k + 1 < len(args)]
+        outs = [args[k + 1] for k, a in enumerate(args) if k + 1 < len(args) and (
+            a in {"-O", "--output-document", "-P", "--directory-prefix"}
+            or (re.match(r"^-[a-zA-Z]+$", a) and a[-1] in "OP"))]  # -qO FILE
         outs += [a.split("=", 1)[1] for a in args if a.startswith(("--output-document=", "--directory-prefix="))]
+        outs += [m.group(1) for m in (re.match(r"^-[a-zA-Z]*[OP](.+)$", a) for a in args) if m]  # -O- / -qO-
         if "--spider" not in args and (not outs or any(
                 o != "-" and o not in SAFE_SINKS and not scratch(o, root, cur) for o in outs)):
             return "`wget` saves files"
