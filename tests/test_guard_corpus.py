@@ -1429,6 +1429,14 @@ class GuardCorpus(unittest.TestCase):
                         data = {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(self.project),
                                 "agent_type": ROLES["dev"]}
                         self.assertIsNotNone(guard.decide(data))
+            # a pattern that matches more than the cap is blocked rather than guessed at
+            (home / "many").mkdir()
+            for i in range(guard.GLOB_CAP + 2):
+                (home / "many" / f"f{i}").write_text("")
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                data = {"tool_name": "Bash", "tool_input": {"command": f"echo x > {home}/many/f*"},
+                        "cwd": str(self.project), "agent_type": ROLES["dev"]}
+                self.assertIn("settings", guard.decide(data) or "")
 
     def test_unexpected_errors_block_etk_agents(self):
         agent = ROLES["dev"]

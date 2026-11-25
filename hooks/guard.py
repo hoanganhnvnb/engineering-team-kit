@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import fnmatch
 import glob
+import itertools
 import json
 import os
 import re
@@ -1094,6 +1095,7 @@ def in_plugin_data(path: str, cur: str | None) -> bool:
 TOOL_HOME_DIRS = (".claude", ".pyenv/versions", ".pyenv/shims", ".local/share/uv/python", ".asdf/installs/python",
                   ".asdf/shims", ".local/share/mise/installs/python", ".local/share/mise/shims")
 TOOL_HOME_FILES = (".claude.json",)
+GLOB_CAP = 256
 
 
 def in_tool_home(path: str, cur: str | None) -> bool:
@@ -1121,7 +1123,13 @@ def in_tool_home(path: str, cur: str | None) -> bool:
     on_path = {os.path.realpath(x).lower() for x in os.environ.get("PATH", "").split(os.pathsep)
                if os.path.isabs(x)} | {os.path.join(h, ".local", "bin")}
     on_path = {d for d in on_path if d.startswith(h + os.sep)}
-    for cand in glob.glob(full) or [full]:
+    cands = [full]
+    if re.search(r"[*?\[]", full):  # the shell expands these; look at every file they could name
+        found = list(itertools.islice(glob.iglob(full), GLOB_CAP + 1))
+        if len(found) > GLOB_CAP:
+            return True  # too many to judge: block rather than guess
+        cands += found
+    for cand in cands:
         real = os.path.realpath(cand).lower()
         if any(real == w or real.startswith(w + os.sep) for w in whole) or real in {
                 os.path.join(h, f) for f in TOOL_HOME_FILES}:
