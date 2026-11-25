@@ -622,15 +622,105 @@ def check_rm(args: list[str], root: str, cur: str | None) -> None:
         raise Blocked(f"`rm -r {target}` is outside the project")
 
 
-DEPLOY = [
-    (r"^(npm|pnpm|yarn|bun) publish\b|^cargo publish\b|^twine upload\b|^gem push\b", "publishing packages needs explicit user approval"),
-    (r"^shopify (app (deploy|release)|theme (push|publish|delete))\b", "deploying to a Shopify store needs explicit user approval"),
-    (r"^vercel\b.*--prod|^netlify deploy\b.*--prod|^fly deploy\b|^firebase deploy\b|^(serverless|sls) deploy\b", "deploys need explicit user approval"),
-    (r"^kubectl (apply|delete|replace|rollout)\b|^helm (install|upgrade|uninstall)\b|^terraform (apply|destroy)\b|^pulumi (up|destroy)\b", "infrastructure changes need explicit user approval"),
-    (r"^docker push\b", "pushing images needs explicit user approval"),
-    (r"^gh (pr merge|release create|repo delete)\b", "merging/releasing needs explicit user approval"),
-    (r"^(psql|mysql|sqlite3|mongosh)\b.*\b(drop\s+(table|database)|truncate\s+table|dropdatabase)", "destructive SQL needs explicit user approval"),
-]
+SQL_DESTRUCTIVE = re.compile(r"\b(drop\s+(table|database)|truncate\s+table|dropdatabase)", re.I)
+PKG_OPTS = {"--prefix", "--workspace", "-w", "--filter", "-C", "--registry", "--cwd", "--userconfig", "--cache"}
+KUBE_OPTS = {"-n", "--namespace", "--context", "--cluster", "--user", "--kubeconfig", "-s", "--server", "--token",
+             "--as", "--as-group", "--cache-dir", "--certificate-authority", "--client-certificate", "--client-key",
+             "--request-timeout", "--tls-server-name", "--username", "--password"}
+HELM_OPTS = {"-n", "--namespace", "--kube-context", "--kubeconfig", "--kube-token", "--kube-as-user",
+             "--kube-apiserver", "--registry-config", "--repository-config", "--repository-cache"}
+DOCKER_OPTS = {"-H", "--host", "--context", "-c", "-l", "--log-level", "--config", "--tlscacert", "--tlscert", "--tlskey"}
+# tool -> (global options that take a value, {first subcommand(s)}, reason)
+DEPLOY_TOOLS = {
+    "npm": (PKG_OPTS, {("publish",), ("unpublish",)}, "publishing packages needs explicit user approval"),
+    "pnpm": (PKG_OPTS, {("publish",), ("unpublish",)}, "publishing packages needs explicit user approval"),
+    "yarn": (PKG_OPTS, {("publish",), ("npm", "publish")}, "publishing packages needs explicit user approval"),
+    "bun": (PKG_OPTS, {("publish",)}, "publishing packages needs explicit user approval"),
+    "cargo": ({"-Z", "--config", "--manifest-path"}, {("publish",)}, "publishing packages needs explicit user approval"),
+    "twine": (set(), {("upload",)}, "publishing packages needs explicit user approval"),
+    "gem": (set(), {("push",)}, "publishing packages needs explicit user approval"),
+    "shopify": ({"--path", "--store", "-s"}, {("app", "deploy"), ("app", "release"), ("theme", "push"),
+                                              ("theme", "publish"), ("theme", "delete")},
+                "deploying to a Shopify store needs explicit user approval"),
+    "fly": (set(), {("deploy",)}, "deploys need explicit user approval"),
+    "flyctl": (set(), {("deploy",)}, "deploys need explicit user approval"),
+    "firebase": (set(), {("deploy",)}, "deploys need explicit user approval"),
+    "serverless": (set(), {("deploy",)}, "deploys need explicit user approval"),
+    "sls": (set(), {("deploy",)}, "deploys need explicit user approval"),
+    "wrangler": (set(), {("deploy",), ("publish",)}, "deploys need explicit user approval"),
+    "cdk": (set(), {("deploy",), ("destroy",)}, "deploys need explicit user approval"),
+    "kubectl": (KUBE_OPTS, {(v,) for v in ("apply", "delete", "replace", "rollout", "patch", "scale", "create", "edit",
+                                           "drain")}, "infrastructure changes need explicit user approval"),
+    "helm": (HELM_OPTS, {(v,) for v in ("install", "upgrade", "uninstall", "rollback", "delete")},
+             "infrastructure changes need explicit user approval"),
+    "terraform": (set(), {("apply",), ("destroy",)}, "infrastructure changes need explicit user approval"),
+    "tofu": (set(), {("apply",), ("destroy",)}, "infrastructure changes need explicit user approval"),
+    "pulumi": ({"--cwd", "-C", "--stack", "-s"}, {("up",), ("destroy",)}, "infrastructure changes need explicit user approval"),
+    "docker": (DOCKER_OPTS, {("push",), ("image", "push"), ("manifest", "push"), ("compose", "push")},
+               "pushing images needs explicit user approval"),
+    "gh": ({"-R", "--repo"}, {("pr", "merge"), ("release", "create"), ("repo", "delete")},
+           "merging/releasing needs explicit user approval"),
+}
+RUNNERS = {"npx", "bunx", "pnpx", "pnpm", "yarn", "npm", "uvx", "pipx", "python", "python3"}
+
+
+def positionals(args: list[str], takes_value: set) -> list[str]:
+    """Words that aren't options, skipping the values of options known to take one."""
+    out, i = [], 0
+    while i < len(args):
+        w = args[i]
+        if w.startswith("+") and len(w) > 1:  # cargo +nightly
+            i += 1
+        elif w.startswith("-") and w != "-":
+            i += 2 if w in takes_value else 1
+        else:
+            out.append(w)
+            i += 1
+    return out
+
+
+def gh_api_mutates(args: list[str]) -> bool:
+    method, fields = None, False
+    for i, a in enumerate(args):
+        if a in {"-X", "--method"} and i + 1 < len(args):
+            method = args[i + 1]
+        elif a.startswith("--method="):
+            method = a.split("=", 1)[1]
+        elif a.startswith("-X") and len(a) > 2:
+            method = a[2:]
+        elif a in {"-f", "-F", "--field", "--raw-field", "--input"} or a.startswith(("-f", "-F")) and "=" in a:
+            fields = True
+    mutating = (method or "").upper() in {"POST", "PUT", "PATCH", "DELETE"} or (method is None and fields)
+    if mutating and "graphql" in args:
+        return "mutation" in " ".join(args).lower()
+    return mutating
+
+
+def check_deploy(words: list[str]) -> None:
+    """Publishing, deploys, infra changes: judged on the real tool, after its global options."""
+    starts = [words]
+    if os.path.basename(words[0]) in RUNNERS:  # npx vercel, pnpm dlx x, python -m twine, ...
+        starts += [words[k:] for k in range(1, len(words))]
+    for w in starts:
+        tool = os.path.basename(w[0]).lower()
+        args = w[1:]
+        if tool in {"psql", "mysql", "sqlite3", "mongosh"} and SQL_DESTRUCTIVE.search(" ".join(args)):
+            raise Blocked("destructive SQL needs explicit user approval")
+        if tool in {"vercel", "netlify"}:
+            prod = any(a in {"--prod", "--production"} or a.startswith("--prod=") for a in args)
+            if prod or (tool == "netlify" and positionals(args, set())[:1] == ["deploy"] and "-p" in args):
+                raise Blocked("deploys need explicit user approval")
+        if tool == "gh" and positionals(args, {"-R", "--repo"})[:1] == ["api"] and gh_api_mutates(args):
+            raise Blocked("`gh api` calls that change things (merge, release, delete) need explicit user approval")
+        spec = DEPLOY_TOOLS.get(tool)
+        if spec:
+            pos = positionals(args, spec[0])
+            if any(tuple(pos[:len(sub)]) == sub for sub in spec[1]):
+                raise Blocked(spec[2])
+            if tool == "docker" and pos[:1] == ["buildx"] and "--push" in args:
+                raise Blocked(spec[2])
+
+
 SHELL_WRITERS = {"rm", "mv", "cp", "tee", "touch", "truncate", "dd", "chmod", "chown", "ln", "patch", "install"}
 SAFE_SINKS = {"/dev/null", "/dev/stderr", "/dev/stdout"}
 
@@ -868,10 +958,7 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
                 check_bash(text, root, role, depth + 1, cur)
     if prog == "find":
         check_find(words[1:], root, role, depth, cur)
-    line = " ".join([prog] + words[1:])
-    for pattern, reason in DEPLOY:
-        if re.search(pattern, line, re.I):
-            raise Blocked(reason)
+    check_deploy(words)
     if prog == "git":
         check_git(words[1:], root, cur)
     if prog == "rm":

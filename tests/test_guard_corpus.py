@@ -600,8 +600,59 @@ GIT_DIR_AND_CLEAN = (
     ]]
 )
 
+# R1-5: deploy and infra commands with global options, or through npx.
+DEPLOY_FORMS = (
+    [("dev", c, "block") for c in [
+        "kubectl -n prod apply -f x.yml",
+        "kubectl --context prod delete pod x",
+        "kubectl --namespace=prod rollout restart deploy/x",
+        "terraform -chdir=infra apply",
+        "terraform -chdir=infra destroy",
+        "helm -n x upgrade app ./chart",
+        "helm --kube-context prod install app ./chart",
+        "docker -H tcp://h:2375 push img",
+        "docker --context prod image push img",
+        "docker buildx build --push -t img .",
+        "npx vercel --prod",
+        "npx --yes vercel --prod",
+        "npx netlify deploy --prod",
+        "pnpm dlx vercel --prod",
+        "npx wrangler deploy",
+        "npx firebase deploy",
+        "npm --prefix web publish",
+        "pnpm -r publish",
+        "yarn npm publish",
+        "cargo +nightly publish",
+        "python -m twine upload dist/*",
+        "gh -R org/repo pr merge 12",
+        "gh api -X PUT repos/o/r/pulls/12/merge",
+        "gh api --method=DELETE repos/o/r",
+        "gh api repos/o/r/releases -f tag_name=v1",
+        "sudo kubectl -n prod apply -f x.yml",
+        "psql -c 'DROP TABLE users'",
+    ]]
+    + [("dev", c, "allow") for c in [
+        "kubectl -n prod get pods",
+        "kubectl --context prod logs x",
+        "terraform -chdir=infra plan",
+        "helm -n x list",
+        "docker -H tcp://h:2375 ps",
+        "docker build -t img .",
+        "npx vercel --version",
+        "npx jest --prod",
+        "npm --prefix web test",
+        "yarn install",
+        "cargo +nightly build",
+        "gh -R org/repo pr view 12",
+        "gh api repos/o/r/pulls/12",
+        "gh api graphql -f query='query { viewer { login } }'",
+        "psql -c 'select 1'",
+        "shopify theme dev",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS)
 
 
 def make_project(base: Path) -> Path:
