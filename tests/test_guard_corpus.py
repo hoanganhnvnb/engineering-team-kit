@@ -1278,6 +1278,12 @@ TOOL_HOME = (
         "cp x ~/.local/share/uv/python/cpython-3.12/bin/python3",
         "ln -sf /bin/true ~/.local/bin/python3.12",
         "tee ~/.claude/hooks/x.sh",
+        "echo x > ~/.CLAUDE/settings.json",
+        "echo x > ~/.claude/CLAUDE.md",
+        "echo x > ~/.claude.json",
+        "ln -sf /bin/true ~/.pyenv/shims/python3",
+        "ln -sf /bin/true ~/.asdf/shims/python3",
+        "cd ~/nowhere-$X && cp x .pyenv/versions/0/bin/python3",
     ]]
     + [(r, c, "allow") for r in ("dev", "rev", "qa") for c in [
         "cat ~/.claude/settings.json",
@@ -1411,6 +1417,18 @@ class GuardCorpus(unittest.TestCase):
                         "agent_type": ROLES[role]}
                 with self.subTest(role=role, path=path):
                     self.assertIsNotNone(guard.decide(data))
+
+    def test_globs_into_the_claude_folder_are_expanded_like_the_shell_does(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            (home / ".claude").mkdir()
+            (home / ".claude" / "settings.json").write_text("{}")
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                for cmd in (f"echo x > {home}/.cl*/settings.json", f"echo x > {home}/.c[l]aude/settings.json"):
+                    with self.subTest(cmd=cmd):
+                        data = {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(self.project),
+                                "agent_type": ROLES["dev"]}
+                        self.assertIsNotNone(guard.decide(data))
 
     def test_unexpected_errors_block_etk_agents(self):
         agent = ROLES["dev"]

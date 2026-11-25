@@ -35,6 +35,7 @@ This is a seatbelt, not a sandbox: it stops the accidents agents actually make.
 from __future__ import annotations
 
 import fnmatch
+import glob
 import json
 import os
 import re
@@ -1090,29 +1091,44 @@ def in_plugin_data(path: str, cur: str | None) -> bool:
     return inside(absjoin(p, cur), data)
 
 
-TOOL_HOME_DIRS = (".claude/plugins", ".claude/hooks", ".pyenv/versions", ".local/share/uv/python",
-                  ".asdf/installs/python", ".local/share/mise/installs/python")
+TOOL_HOME_DIRS = (".claude", ".pyenv/versions", ".pyenv/shims", ".local/share/uv/python", ".asdf/installs/python",
+                  ".asdf/shims", ".local/share/mise/installs/python", ".local/share/mise/shims")
+TOOL_HOME_FILES = (".claude.json",)
 
 
 def in_tool_home(path: str, cur: str | None) -> bool:
     """User-level files that decide what runs for the Lead and for this hook: Claude Code's own
-    settings, installed plugins (including this hook's code), and the folders `find-python.sh`
-    picks an interpreter from. A subagent never needs to write there."""
+    config (`~/.claude`, `~/.claude.json`, $CLAUDE_CONFIG_DIR), installed plugins (this hook's code
+    included), the folders `find-python.sh` picks an interpreter from and the shim folders on PATH.
+    A subagent never needs to write there.
+
+    Compared case-insensitively (macOS), with shell globs expanded the way the shell will, and a
+    relative path into a Python or `.local` folder is blocked when the directory is unknown."""
     home = os.environ.get("HOME", "")
     if not os.path.isabs(home):
         return False
-    full = absjoin(expand_home(path.strip().strip("'\""), home), cur)
+    p = path.strip().strip("'\"")
+    full = absjoin(expand_home(p, home), cur)
     if full is None:
-        return False
-    real, h = os.path.realpath(full), os.path.realpath(home)
-    bases = [os.path.join(h, d) for d in TOOL_HOME_DIRS]
-    bases += [os.environ[v] for v in ("PYENV_ROOT", "UV_PYTHON_INSTALL_DIR") if os.path.isabs(os.environ.get(v, ""))]
-    if any(real == b or real.startswith(b + os.sep) for b in bases):
-        return True
-    name = os.path.basename(real)
-    if os.path.dirname(real) == os.path.join(h, ".claude") and re.match(r"settings.*\.json$", name):
-        return True
-    return os.path.dirname(real) == os.path.join(h, ".local", "bin") and name.startswith("python")
+        return re.match(r"^(\./)?\.(pyenv|asdf|local)(/|$)", p) is not None
+    h = os.path.realpath(home).lower()
+    whole = [os.path.join(h, d.lower()) for d in TOOL_HOME_DIRS]  # nothing in these is a subagent's
+    for var in ("PYENV_ROOT", "UV_PYTHON_INSTALL_DIR", "CLAUDE_CONFIG_DIR"):
+        v = os.environ.get(var, "")
+        if os.path.isabs(v):
+            whole.append(os.path.realpath(v).lower())
+    # Folders on PATH under HOME (`~/.local/bin`): only an interpreter name there can hijack the hook.
+    on_path = {os.path.realpath(x).lower() for x in os.environ.get("PATH", "").split(os.pathsep)
+               if os.path.isabs(x)} | {os.path.join(h, ".local", "bin")}
+    on_path = {d for d in on_path if d.startswith(h + os.sep)}
+    for cand in glob.glob(full) or [full]:
+        real = os.path.realpath(cand).lower()
+        if any(real == w or real.startswith(w + os.sep) for w in whole) or real in {
+                os.path.join(h, f) for f in TOOL_HOME_FILES}:
+            return True
+        if os.path.dirname(real) in on_path and os.path.basename(real).startswith("python"):
+            return True
+    return False
 
 
 def in_run_records(path: str, cur: str | None) -> bool:
