@@ -747,3 +747,55 @@ class DiscoverTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EvalRunTests(unittest.TestCase):
+    """evals/run.sh against a one-skill mini repo and a stand-in `claude`."""
+
+    SNAPSHOT = '!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover`'
+
+    def mini_repo(self, skill_text):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name) / "repo"
+        (root / "evals").mkdir(parents=True)
+        (root / "skills" / "one").mkdir(parents=True)
+        (root / "evals" / "run.sh").write_text((ROOT / "evals" / "run.sh").read_text())
+        (root / "skills" / "one" / "SKILL.md").write_text(skill_text)
+        sh(["git", "init", "-q"], root)
+        bin_dir = Path(tmp.name) / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "claude").write_text(
+            "#!/bin/sh\n"
+            "grep -q 'Run this first with the Bash tool' skills/one/SKILL.md || { echo unpatched; exit 9; }\n"
+            "echo \"claude $*\"\n")
+        (bin_dir / "xargs").write_text("#!/bin/sh\necho xargs must not be used >&2\nexit 99\n")
+        for f in bin_dir.iterdir():
+            f.chmod(0o755)
+        env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", TMPDIR=tmp.name)
+        return root, env
+
+    def run_script(self, root, env, *args):
+        return subprocess.run(["sh", str(root / "evals" / "run.sh"), *args], cwd=root, env=env,
+                              capture_output=True, text=True, timeout=60)
+
+    def test_patches_every_skill_without_xargs_and_warns_about_threshold(self):
+        root, env = self.mini_repo(f"---\nname: one\n---\n{self.SNAPSHOT}\n")
+        r = self.run_script(root, env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("claude plugin eval", r.stdout)
+        self.assertIn("--threshold 0", r.stderr)
+        self.assertIn(self.SNAPSHOT, (root / "skills" / "one" / "SKILL.md").read_text(), "the real skill must stay untouched")
+
+    def test_no_threshold_warning_when_caller_sets_one(self):
+        root, env = self.mini_repo(f"---\nname: one\n---\n{self.SNAPSHOT}\n")
+        r = self.run_script(root, env, "--threshold", "3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("exits 0 whatever", r.stderr)
+
+    def test_fails_when_a_skill_was_not_rewritten(self):
+        root, env = self.mini_repo("---\nname: one\n---\nno snapshot line here\n")
+        r = self.run_script(root, env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("rewrote the snapshot line in 0 of 1 skills", r.stderr)
+        self.assertNotIn("claude plugin eval", r.stdout)
