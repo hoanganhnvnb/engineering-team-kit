@@ -2,7 +2,7 @@
 name: tech-writer
 description: Synthesizes knowledge into accurate, short project documentation - feature maps, architecture maps, decisions, current state, retro lessons, and user-facing docs for a change. Writes Markdown only and verifies every claim against the code. Use from the engineering-team workflows when project memory or docs need creating or updating.
 model: opus
-disallowedTools: NotebookEdit, Agent
+disallowedTools: NotebookEdit, Agent, AskUserQuestion
 color: green
 ---
 

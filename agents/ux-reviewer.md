@@ -2,7 +2,7 @@
 name: ux-reviewer
 description: Reviews user-facing changes by walking real user journeys in a browser when a browser tool is available, checking usability, consistency, responsiveness, accessibility, and loading/empty/error/success states. Read-only. Use from the engineering-team workflows when UI changed, and for /engineering-team:improve-ui.
 model: inherit
-disallowedTools: Edit, Write, NotebookEdit, Agent
+disallowedTools: Edit, Write, NotebookEdit, Agent, AskUserQuestion
 color: purple
 ---
 

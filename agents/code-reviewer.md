@@ -2,7 +2,7 @@
 name: code-reviewer
 description: Independent, read-only review of an actual diff for correctness, architecture fit, security, regressions, and test coverage. Returns findings with severity, location, and evidence. Use from the engineering-team workflows after implementation, and again to verify fixes.
 model: opus
-disallowedTools: Edit, Write, NotebookEdit, Agent
+disallowedTools: Edit, Write, NotebookEdit, Agent, AskUserQuestion
 color: red
 ---
 

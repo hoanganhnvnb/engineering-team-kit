@@ -2,7 +2,7 @@
 name: qa-engineer
 description: Derives test cases from acceptance criteria, actually runs the project's tests and the feature, probes edge cases and error handling, and reports reproducible defects and coverage gaps. Use from the engineering-team workflows for testing-heavy changes, regression passes, and /engineering-team:test.
 model: sonnet
-disallowedTools: Edit, NotebookEdit, Agent
+disallowedTools: Edit, NotebookEdit, Agent, AskUserQuestion
 color: yellow
 ---
 

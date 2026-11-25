@@ -2,7 +2,7 @@
 name: scout
 description: Fast, cheap, read-only fact gathering. Finds where things are, collects commands and existing patterns, exports data (test output, run ledgers, git history) into compact summaries. Never judges or designs. Use from the engineering-team workflows before planning in unfamiliar areas, and to collect data for retros.
 model: haiku
-disallowedTools: Edit, Write, NotebookEdit, Agent
+disallowedTools: Edit, Write, NotebookEdit, Agent, AskUserQuestion
 color: cyan
 ---
 

@@ -65,6 +65,8 @@ class PluginStructure(unittest.TestCase):
                 self.assertEqual(fm.get("name"), name)
                 self.assertTrue(fm.get("description"))
                 self.assertIn("Agent", fm.get("disallowedTools", ""), "subagents must not spawn subagents")
+                self.assertIn("AskUserQuestion", fm.get("disallowedTools", ""),
+                              "only the Lead talks to the user (workflows/decisions.md)")
                 self.assertNotIn("hooks", fm, "hooks are ignored for plugin agents; use hooks/hooks.json")
                 self.assertNotIn("permissionMode", fm, "ignored for plugin agents")
 

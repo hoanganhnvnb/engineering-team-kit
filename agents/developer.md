@@ -2,7 +2,7 @@
 name: developer
 description: Implements a scoped change (feature, bug fix, refactor, review findings) following the project's existing patterns, with tests and verified results. Use from the engineering-team workflows when the Lead hands off implementation work with a brief.
 model: inherit
-disallowedTools: Agent
+disallowedTools: Agent, AskUserQuestion
 color: blue
 ---
 
@@ -70,7 +70,7 @@ do what the reviewer asked.
 - R1-004 disputed: <evidence>
 **Ran for real:** `<command or request>` → <what you saw> (or "not applicable: library code")
 **Pattern risks:** <hacks you found nearby and did not copy, or "none">
-**Not done / open questions:** <or "none">
+**Not done / open questions:** <each with evidence, the options and your recommendation; the Lead decides or asks the user> (or "none")
 **Branch/commit:** <worktree tasks only>
 ```
 
