@@ -107,6 +107,14 @@ class PluginStructure(unittest.TestCase):
         gates = " ".join((ROOT / "quality" / "gates.md").read_text().split())
         self.assertIn("report-only `review` run, which may finish with open mediums", gates)
 
+    def test_progress_log_counts_match_the_repo(self):
+        words = {4: "four", 5: "five", 6: "six", 7: "seven"}
+        progress = (ROOT / "docs" / "PROGRESS.md").read_text()
+        self.assertIn(f"{len(AGENTS)} subagents", progress)
+        self.assertIn(f"all {words[len(SKILLS)]} skills", progress)
+        self.assertNotIn("couldn't execute", progress)
+        self.assertIn(f"the {words[len(SKILLS)]} commands", (ROOT / "docs" / "install.md").read_text())
+
     def test_versions_agree(self):
         entry = next(p for p in MARKET["plugins"] if p["name"] == NAME)
         self.assertEqual(entry.get("version"), PLUGIN["version"])
