@@ -1104,8 +1104,28 @@ GIT_ENV = (
     + [("dev", "HOME=/tmp/x git log", "allow"), ("dev", "GIT_DIR=.git git log", "allow")]
 )
 
+# etk exec behind interpreter options, or in a form we can't read.
+ETK_EXEC_FORMS = (
+    [("dev", c, "block") for c in [
+        "python3 -u scripts/etk_run.py exec G3 --type test -- git push",
+        "sh -e scripts/etk.sh exec G3 --type test -- git push",
+        "bash -x -e etk.sh exec G3 --type test -- git push",
+        "env X=1 etk.sh exec G3 --type test -- git push",
+        "python3 -u etk_run.py --foo exec G3 --type test -- npm test",
+        "sh -e etk.sh --foo exec G3 --type test -- npm test",
+    ]]
+    + [(r, "python3 -u scripts/etk_run.py exec G3 --type test -- npm test", "block") for r in ("rev", "scout")]
+    + [("dev", c, "allow") for c in [
+        "python3 -u scripts/etk_run.py exec G3 --type test -- npm test",
+        "python3 -u scripts/etk_run.py run latest",
+        "sh -e scripts/etk.sh discover",
+        "cat scripts/etk.sh",
+        "grep exec scripts/etk.sh",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES + ETK_EXEC_FORMS)
 
 
 def make_project(base: Path) -> Path:

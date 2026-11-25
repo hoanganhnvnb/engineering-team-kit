@@ -1028,13 +1028,21 @@ ETK_ENTRYPOINTS = {"etk.sh", "etk_run.py"}
 
 
 def etk_exec_command(words: list[str]) -> list[str] | None:
-    """The command `etk.sh exec GATE --type T -- CMD...` will run, or None if this isn't that."""
-    for k in range(min(2, len(words))):  # etk.sh, or an interpreter running it
-        if os.path.basename(words[k]) in ETK_ENTRYPOINTS and words[k + 1:k + 2] == ["exec"]:
-            rest = words[k + 2:]
+    """The command `etk.sh exec GATE --type T -- CMD...` will run, or None if this isn't that.
+
+    The entry point can sit behind interpreter options (`python3 -u etk_run.py exec ...`). An `exec`
+    that isn't right after it can't be told apart from the real thing, so that is blocked too."""
+    for k, w in enumerate(words):
+        if os.path.basename(w) not in ETK_ENTRYPOINTS:
+            continue
+        rest = words[k + 1:]
+        if rest[:1] == ["exec"]:
+            rest = rest[1:]
             if "--" not in rest:
                 raise Blocked("`etk exec` without `-- <command>` can't be checked")
             return rest[rest.index("--") + 1:]
+        if "exec" in rest:
+            raise Blocked("`etk exec` with options before `exec` can't be checked; put `exec` right after the script")
     return None
 
 
