@@ -991,8 +991,69 @@ ETK_EXEC = (
     + [("rev", "etk.sh run latest", "allow"), ("rev", "etk.sh discover", "allow")]
 )
 
+# Read-only git: only options known to be read-only, so abbreviations can't sneak a program in.
+GIT_OPTIONS = (
+    [(r, c, "block") for r in ("rev", "qa") for c in [
+        "git diff --ext",
+        "git diff --ext-diff",
+        "git log --textconv",
+        "git show --textc HEAD:a",
+        "git grep --open-files",
+        "git grep --open-files-in-pager=sh x",
+        "git grep -O sh x",
+        "git grep -Osh x",
+        "git ls-remote --upload origin",
+        "git ls-remote --upload-pack=x origin",
+        "git ls-remote --receive-pack=x origin",
+        "git diff --output=x",
+        "git diff --outp=x",
+        "git log --output x",
+        "git --exec-path=/x log",
+        "git --git-dir=/x log",
+        "git --work-tree=/x status",
+        "git --paginate log",
+        "git -c core.pager=x log",
+        "git log --unknown-flag",
+        "git status --ign=all",
+        "git cat-file --textconv HEAD:a",
+        "git cat-file --filters HEAD:a",
+    ]]
+    + [(r, c, "allow") for r in ("rev", "qa") for c in [
+        "git diff --stat --cached",
+        "git diff -U5 main",
+        "git diff -w --name-only",
+        "git diff --diff-filter=ACMR --name-only main...HEAD",
+        "git diff HEAD~1 HEAD --name-status",
+        "git log --oneline -5",
+        "git log -n 5 --format=%H",
+        "git log --since=2.days --author=x",
+        "git log -p -- src",
+        "git log --graph --decorate --all",
+        "git show --stat HEAD",
+        "git show HEAD:README.md",
+        "git status -sb",
+        "git status --porcelain=v2 --branch",
+        "git grep -n -i -e foo",
+        "git grep -l --untracked foo",
+        "git blame -L 1,5 src/a.js",
+        "git blame --line-porcelain src/a.js",
+        "git rev-parse --show-toplevel",
+        "git rev-parse --abbrev-ref HEAD",
+        "git ls-files --others --exclude-standard",
+        "git ls-files -z",
+        "git merge-base --is-ancestor main HEAD",
+        "git -C . log --oneline",
+        "git --no-pager log -3",
+        "git cat-file -p HEAD",
+        "git for-each-ref --format=%(refname) refs/heads",
+        "git describe --tags --always",
+        "git shortlog -sn",
+        "git ls-tree -r HEAD --name-only",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS)
 
 
 def make_project(base: Path) -> Path:

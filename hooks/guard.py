@@ -1124,28 +1124,119 @@ for _alias, _base in {"pnpm": "npm", "yarn": "npm", "bun": "npm", "pip3": "pip",
 QA_GIT = {"add", "commit"}
 
 
-GIT_RUNS_PROGRAM = re.compile(r"^--(upload-pack|receive-pack|exec|open-files-in-pager|ext-diff|textconv)(=.*)?$")
 GIT_ENV_HOOKS = re.compile(r"^(GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+|GIT_CONFIG_PARAMETERS|"
                            r"GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_EXTERNAL_DIFF|GIT_SSH|GIT_SSH_COMMAND|GIT_PAGER|"
                            r"GIT_ASKPASS|GIT_PROXY_COMMAND|GIT_EDITOR|GIT_SEQUENCE_EDITOR|GIT_EXEC_PATH)=")
 
 
+_DIFF = """--stat --shortstat --numstat --name-only --name-status --summary --patch --no-patch --raw --cached --staged
+--no-index --check --quiet --exit-code --color --no-color --color-words --color-moved --word-diff --word-diff-regex
+--minimal --patience --histogram --diff-algorithm --ignore-space-change --ignore-all-space --ignore-blank-lines
+--ignore-space-at-eol --ignore-cr-at-eol --find-renames --find-copies --find-copies-harder --no-renames
+--diff-filter --function-context --unified --abbrev --full-index --binary --src-prefix --dst-prefix --no-prefix
+--relative --text --submodule --dirstat --compact-summary --stat-width --stat-name-width --stat-count
+--inter-hunk-context --merge-base --cc --combined --dense-combined --no-ext-diff --indent-heuristic
+--no-indent-heuristic --irreversible-delete --pickaxe-all --pickaxe-regex --break-rewrites --find-object
+--ws-error-highlight --line-prefix --no-color-moved --skip-to --rotate-to
+-p -u -s -z -a -b -w -M -C -B -R -S -G -U -l -q -W -1 -2 -3 --""".split()
+_LOG = """--oneline --graph --decorate --no-decorate --all --branches --tags --remotes --first-parent --merges --no-merges
+--max-count --skip --since --until --after --before --author --committer --grep --invert-grep --all-match
+--regexp-ignore-case --extended-regexp --fixed-strings --perl-regexp --format --pretty --date --reverse --follow
+--simplify-by-decoration --simplify-merges --abbrev-commit --no-abbrev-commit --topo-order --date-order
+--author-date-order --ancestry-path --left-right --cherry-pick --cherry-mark --cherry --boundary --walk-reflogs
+--children --parents --show-signature --notes --no-notes --source --use-mailmap --no-use-mailmap --encoding
+--log-size --relative-date --count --exclude --glob --not --no-walk --do-walk --full-history --sparse --dense
+--show-pulls --max-parents --min-parents --left-only --right-only --objects --header --timestamp
+-n -i -E -F -P -g -m -c --decorate-refs --decorate-refs-exclude --bisect --stdin --remove-empty""".split()
+GIT_OPTION_ALLOW: dict = {}
+GIT_OPTION_ALLOW.update({
+    "diff": set(_DIFF), "diff-tree": set(_DIFF) | {"-r", "-t", "--root", "--stdin", "--no-commit-id", "-c"},
+    "diff-files": set(_DIFF), "diff-index": set(_DIFF), "range-diff": set(_DIFF),
+    "log": set(_DIFF) | set(_LOG), "show": set(_DIFF) | set(_LOG), "whatchanged": set(_DIFF) | set(_LOG),
+    "rev-list": set(_LOG),
+    "shortlog": set(_LOG) | {"-s", "-e", "--summary", "--numbered", "--email", "--group"},
+    "status": set("""--short --branch --porcelain --long --untracked-files --ignored --ignore-submodules --no-renames
+        --find-renames --column --no-column --show-stash --ahead-behind --no-ahead-behind --verbose -s -b -u -v -z
+        --renames""".split()),
+    "grep": set("""--count --line-number --ignore-case --word-regexp --invert-match --files-with-matches
+        --files-without-match --name-only --extended-regexp --basic-regexp --perl-regexp --fixed-strings --no-index
+        --untracked --cached --no-color --color --heading --break --full-name --max-depth --recursive
+        --no-recursive --context --after-context --before-context --function-context --show-function --null --and
+        --or --not --all-match --threads --quiet --only-matching --text --column --no-exclude-standard
+        --exclude-standard -c -n -i -w -v -l -L -h -H -E -G -P -F -I -a -z -o -q -e -f -A -B -C -W -p -r --""".split()),
+    "blame": set("""--porcelain --line-porcelain --incremental --show-name --show-number --show-email --date --abbrev
+        --root --reverse --first-parent --since --ignore-rev --ignore-revs-file --show-stats --score-debug
+        --minimal -L -p -s -e -w -M -C -b -f -n -t -l -c --""".split()),
+    "rev-parse": set("""--short --verify --abbrev-ref --show-toplevel --git-dir --git-common-dir --absolute-git-dir
+        --is-inside-work-tree --is-inside-git-dir --is-bare-repository --show-prefix --show-cdup --symbolic
+        --symbolic-full-name --quiet --revs-only --no-revs --flags --no-flags --all --branches --tags --remotes
+        --default --sq --path-format --show-superproject-working-tree --git-path --is-shallow-repository
+        --show-object-format --prefix -q --""".split()),
+    "ls-files": set("""--cached --deleted --modified --others --ignored --stage --unmerged --killed --exclude-standard
+        --full-name --error-unmatch --directory --no-empty-directory --eol --abbrev --deduplicate --format --sparse
+        --recurse-submodules --exclude -x -c -d -m -o -i -s -u -k -t -v -z -f --""".split()),
+    "ls-tree": set("-r -d -t -l -z --name-only --name-status --full-name --full-tree --abbrev --long --object-only --".split()),
+    "merge-base": set("--is-ancestor --octopus --independent --fork-point --all -a --".split()),
+    "describe": set("""--tags --all --long --abbrev --always --contains --match --exclude --first-parent --dirty
+        --candidates --exact-match --broken --debug""".split()),
+    "cat-file": set("""-p -t -s -e --batch --batch-check --batch-all-objects --allow-unknown-type --follow-symlinks
+        --batch-command --buffer -Z --""".split()),
+    "show-ref": set("--heads --tags --verify --hash --abbrev --head --dereference --quiet --exists -d -s -q --".split()),
+    "for-each-ref": set("""--format --sort --count --contains --no-contains --merged --no-merged --points-at --shell
+        --perl --python --tcl --stdin --include-root-refs --ignore-case --omit-empty""".split()),
+    "name-rev": set("--tags --refs --name-only --no-undefined --always --all --exclude".split()),
+    "count-objects": set("-v -H --verbose --human-readable".split()),
+    "check-ignore": set("-v -n --verbose --non-matching --stdin -z -q --quiet --no-index --".split()),
+    "ls-remote": set("--heads --tags --refs --get-url --symref --sort -q --quiet -h -t --".split()),
+    "version": {"--build-options"},
+    "help": {"-a", "-g", "--all", "--guides"},
+    "show-branch": set("""-a -r --all --remotes --topics --current --more --list --merge-base --independent --sha1-name
+        --no-name --sparse --date-order --topo-order""".split()),
+    "cherry": {"-v"}, "verify-commit": set("-v --verbose --raw".split()), "verify-tag": set("-v --verbose --raw".split()),
+    "config": set("""--get --get-all --get-regexp --list -l --local --global --system --worktree --show-origin
+        --show-scope --name-only -z --null --type --bool --int --default --includes --no-includes -f --file""".split()),
+})
+GIT_OPTION_ALLOW["branch"] = LIST_FLAGS
+GIT_OPTION_ALLOW["tag"] = LIST_FLAGS
+SHORT_WITH_VALUE = {"-n", "-U", "-S", "-G", "-L", "-M", "-C", "-x", "-A", "-B", "-e", "-f", "-m", "-u", "-l", "-c"}
+
+
+def unknown_git_option(sub: str, rest: list[str]) -> str | None:
+    """The first option that isn't on the subcommand's list of known read-only ones."""
+    allowed = GIT_OPTION_ALLOW.get(sub)
+    if allowed is None:
+        return None
+    for a in rest:
+        if a == "--":
+            break
+        if not a.startswith("-") or a == "-":
+            continue
+        name = a.split("=", 1)[0]
+        if name in allowed or re.match(r"^-\d+$", a):
+            continue
+        if not a.startswith("--") and (name[:2] in allowed and name[:2] in SHORT_WITH_VALUE
+                                       or all(f"-{c}" in allowed for c in a[1:])):
+            continue
+        return a
+    return None
+
+
 def git_read_only_reason(args: list[str], qa: bool = False) -> str | None:
     """Why this git command isn't read-only, or None. Subcommands outside an allowlist are refused."""
-    i, globs = 0, []
+    i = 0
     while i < len(args) and args[i].startswith("-"):
-        globs.append(args[i])
-        i += 2 if args[i] in GIT_GLOBAL_WITH_ARG else 1
-    if any(g in {"-c", "--config-env"} or g.startswith(("-c", "--config-env=")) and g != "-C" for g in globs):
-        return "`git -c` can run arbitrary commands through aliases and config"
+        if args[i] == "-C":
+            i += 2
+        elif args[i] in {"--no-pager", "--no-optional-locks"}:
+            i += 1
+        else:
+            return f"`git {args[i]}` can run programs or change which repository is read"
     if i >= len(args):
         return None
     sub, rest = args[i], args[i + 1:]
-    if any(a == "--output" or a.startswith("--output=") for a in rest):
-        return f"`git {sub} --output` writes a file"
-    if any(GIT_RUNS_PROGRAM.match(a) for a in rest) or (sub == "grep" and any(
-            a == "-O" or (a.startswith("-O") and not a.startswith("--")) for a in rest)):
-        return f"`git {sub}` option that runs an external program"
+    bad = unknown_git_option(sub, rest)
+    if bad:
+        return f"`git {sub} {bad}` isn't an option the guard knows to be read-only"
     if sub in GIT_READ or (qa and sub in QA_GIT):
         return None
     if qa and sub == "worktree" and rest[:1] in (["add"], ["remove"], ["list"]):
