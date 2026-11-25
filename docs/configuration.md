@@ -16,9 +16,9 @@ always sees it.
 | `max_cycles` | int | Review/fix cycles before escalating (default 3). |
 | `commit` | bool | `true` lets the Lead commit locally at the end (never push). Default `false`. |
 | `invariants` | string[] | Business rules that must hold. Reviewers and QA check them (G4). |
-| `protected_paths` | string[] | Paths no agent changes without asking you first. |
+| `protected_paths` | string[] | Paths no agent changes without asking you first. The guard reads this file from the session's working directory and blocks ETK subagents (every role) from writing under these paths with Write/Edit or through the shell (redirects, `rm`, `mv`, `cp`, `sed -i`, `git rm`, and similar). Entries are paths, directories (`db/migrations/`) or globs (`infra/**`, `src/legacy/*.js`). It stops accidents, not a determined bypass: see [limitations](limitations.md#guard-hook). |
 | `rules` | object[] | Path-scoped invariants: `{"paths": "src/domain/**", "rule": "…", "check": "<cmd>"}`. Reviewers apply each rule to changed files matching `paths` and run `check` if present. Prefer rules with a `check`: prose-only rules are the weakest kind. |
-| `agents` | object | Map an ETK role to a project agent, e.g. `{"code-reviewer": "my-reviewer"}`. |
+| `agents` | object | Map an ETK role to a project agent, e.g. `{"code-reviewer": "my-reviewer"}`. The guard only recognises the plugin's own agents (`engineering-team:*`), so a mapped project agent is **not** guarded: its read-only, QA and tech-writer limits, and the push/deploy/secrets rules, become whatever that agent's own tools and your permission settings allow. |
 | `models` | object | Override an agent's model, e.g. `{"developer": "sonnet", "code-reviewer": "opus"}`. Defaults: scout→haiku, qa-engineer→sonnet, code-reviewer→opus, tech-writer→opus, developer/ux-reviewer→your session's model. |
 | `notes` | string | Anything else, in a line or two. |
 

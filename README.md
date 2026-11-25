@@ -102,9 +102,10 @@ Pinning a version, team-wide setup, upgrades, rollback, and uninstall:
   into a short ratchet plan. ([hardening](quality/hardening.md))
 - **Seatbelt.** A hook stops the plugin's own subagents from pushing, deploying,
   publishing, rewriting history, discarding changes, running `git stash`, or writing
-  `.env`/key files. It also keeps reviewers read-only, even through the shell. Your main
-  session and other plugins aren't affected: the hook's shell wrapper exits right away
-  for them.
+  `.env`/key files, or anything in your `protected_paths`. It also keeps reviewers read-only,
+  even through the shell, and refuses write-style MCP tools. Your main session, other plugins
+  and agents you map in through config aren't affected: the hook's shell wrapper exits right
+  away for them.
   ([guard](hooks/guard.py))
 
 ## Optional project config

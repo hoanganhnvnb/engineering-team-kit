@@ -75,6 +75,11 @@ Honest list. If one of these bites you, an issue is welcome.
   in the same command line (`ln -s /dev/stdin x && bash x`) is blocked when the guard can
   see it being created. A script or link made by an earlier tool call, or by a program the
   command runs, is read as an ordinary file: the guard can't tell what it will do.
+- **Agents mapped through the `agents` config aren't guarded.** The guard matches the
+  `engineering-team:` agent prefix only. If you map a role to your own agent (for example
+  `{"code-reviewer": "my-reviewer"}`), that agent runs without the guard's role limits, deploy
+  rules and `protected_paths`. Give it matching tool restrictions and permission settings of
+  your own.
 - **It only covers the plugin's subagents.** The main session (the Lead) runs under your
   own permission settings. The Lead is told not to push, deploy, or discard work, and the
   skills say so, but no hook enforces it for the main session. A plugin shouldn't change
