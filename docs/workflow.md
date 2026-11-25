@@ -18,8 +18,6 @@ fix the login timeout; if review finds nothing and tests pass, deploy to staging
 continue
 ```
 
-Requests work in any language; the Lead replies in yours.
-
 Claude first prints a one-line plan, such as
 `Plan: fix → review → test → commit+push (fix/cart-rounding) → PR → deploy staging [pre-authorized]`,
 and then works through it without checking in.
@@ -37,7 +35,7 @@ and then works through it without checking in.
 
 The run stops before the next outward step on INCOMPLETE or BLOCKED, when the cycle cap
 is hit, or when a hook, CI or deploy fails. Nothing is pushed while gates are failing.
-`continue` (in any language) resumes an unfinished run from its recorded phase.
+`continue` resumes an unfinished run from its recorded phase.
 
 ## Your workflow profile
 
