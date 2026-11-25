@@ -534,8 +534,10 @@ def check_checkout(rest: list[str], cwd: str) -> None:
 
 # Config that decides where a push goes or which programs git runs. A subagent changing it could
 # redirect the Lead's next push (or select another developer's workflow profile), so only reads pass.
-GIT_CONFIG_GUARDED = re.compile(r"^((remote|url|filter|diff|credential|include|includeif)(\.|$)|"
-                                r"core\.(hookspath|sshcommand|fsmonitor)$)", re.I)
+GIT_CONFIG_GUARDED = re.compile(r"^((remote|url|filter|diff|credential|include|includeif|branch|alias|pager|"
+                                r"sequence|gpg|merge)(\.|$)|core\.(hookspath|sshcommand|fsmonitor|pager|"
+                                r"editor|askpass|gitproxy|attributesfile|excludesfile|worktree)$|"
+                                r"commit\.gpgsign$|push\.)", re.I)
 GIT_CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool",
                     "--list", "-l"}
 GIT_CONFIG_WRITES = {"--add", "--unset", "--unset-all", "--replace-all", "--rename-section", "--remove-section"}
@@ -1107,7 +1109,15 @@ def in_git_control(path: str, cur: str | None) -> bool:
         if spelled is None:
             continue
         parts = os.path.normpath(spelled).replace("\\", "/").split("/")
-        if any(a == ".git" and b in {"config", "hooks"} for a, b in zip(parts, parts[1:])):
+        if any(a == ".git" and b in {"config", "config.worktree", "hooks", "info"}
+               for a, b in zip(parts, parts[1:])):
+            return True
+        if any(a == ".git" and b == "worktrees" and c in {"config", "config.worktree"}
+               for a, b, c in zip(parts, parts[1:], parts[3:])):
+            return True
+        if parts[-1:] == [".gitconfig"] or any(a == "git" and b in {"config", "attributes", "ignore"}
+                                               and i > 0 and parts[i - 1] == ".config"
+                                               for i, (a, b) in enumerate(zip(parts, parts[1:]))):
             return True
     return False
 

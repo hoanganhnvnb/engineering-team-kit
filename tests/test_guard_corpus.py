@@ -1237,6 +1237,30 @@ GIT_REMOTE_CONFIG = (
     + [("dev", c, "allow") for c in ["git config user.name 'Dev Bot'", "git config get remote.origin.url",
                                      "git config --local core.autocrlf false"]]
 )
+# Second review: more keys and files that redirect a push or make git run a program.
+GIT_CONFIG_MORE = (
+    [(r, c, "block") for r in ("dev", "qa") for c in [
+        "git config branch.main.pushRemote evil",
+        "git config branch.main.remote evil",
+        "git config remote.pushDefault evil",
+        "git config alias.st '!touch x'",
+        "git config core.pager 'sh x'",
+        "git config core.editor 'sh x'",
+        "git config core.askPass ./x",
+        "git config gpg.program ./x",
+        "git config commit.gpgSign true",
+        "git config sequence.editor ./x",
+        "git config merge.x.driver ./x",
+        "git config push.default current",
+        "echo x >> ~/.gitconfig",
+        "echo x > .git/config.worktree",
+        "echo x > .git/worktrees/w/config",
+        "echo '* filter=x' > .git/info/attributes",
+        "echo x > ~/.config/git/config",
+    ]]
+    + [("dev", c, "allow") for c in ["git config user.email dev@example.com", "cat ~/.gitconfig",
+                                     "git config --get branch.main.remote"]]
+)
 ETK_INIT = (
     [(r, c, "block") for r in ("dev", "qa", "rev") for c in [
         'sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "Ship it" --kind ship',
@@ -1250,7 +1274,7 @@ ETK_INIT = (
 
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
          + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES + ETK_EXEC_FORMS + GIT_OTHER_OPTIONS + READ_ONLY_READS + NESTED_ENV
-         + CD_HOME + GIT_REMOTE_CONFIG + ETK_INIT)
+         + CD_HOME + GIT_REMOTE_CONFIG + GIT_CONFIG_MORE + ETK_INIT)
 
 
 def make_project(base: Path) -> Path:
