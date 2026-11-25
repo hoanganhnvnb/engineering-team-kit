@@ -4,7 +4,8 @@
 # its root, a deleted venv) or an old system Python.
 #
 # Order: $ETK_PYTHON (yours, when set), names on PATH, system locations, then the folders that
-# pyenv, uv, asdf and mise install into, which are not on PATH when a shim points at another version.
+# pyenv, uv, asdf and mise install into, which are not on PATH when a shim points at another version
+# ($PYENV_ROOT and $UV_PYTHON_INSTALL_DIR are honoured when set).
 # Only your own home folder and system paths are searched, never the project.
 ETK_PY_NAMES="python3 python3.13 python3.12 python"
 ETK_PY_ABS="/usr/bin/python3.12 /usr/local/bin/python3.12 /opt/homebrew/bin/python3.12 /usr/bin/python3 /usr/local/bin/python3 /opt/homebrew/bin/python3"
@@ -24,7 +25,8 @@ etk_find_python() {
     etk_try "$c" && return 0
   done
   h=${HOME:-/nonexistent}
-  for c in "$h"/.pyenv/versions/*/bin/python3 "$h"/.local/share/uv/python/*/bin/python3 \
+  for c in "${PYENV_ROOT:-$h/.pyenv}"/versions/*/bin/python3 \
+           "${UV_PYTHON_INSTALL_DIR:-$h/.local/share/uv/python}"/*/bin/python3 \
            "$h"/.asdf/installs/python/*/bin/python3 "$h"/.local/share/mise/installs/python/*/bin/python3 \
            "$h"/.local/bin/python3.12; do
     etk_try "$c" && return 0

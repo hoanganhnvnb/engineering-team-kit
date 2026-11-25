@@ -45,7 +45,7 @@ class SelftestPython(unittest.TestCase):
         selftest = SELFTEST.read_text()
         finder = (ROOT / "scripts" / "find-python.sh").read_text()
         for cand in ("python3", "python3.13", "python3.12", "/usr/bin/python3", "/usr/local/bin/python3",
-                     "/opt/homebrew/bin/python3", "python", "ETK_PYTHON", ".pyenv/versions", ".local/share/uv/python"):
+                     "/opt/homebrew/bin/python3", "python", "ETK_PYTHON", "PYENV_ROOT", "/versions/*/bin/python3", "UV_PYTHON_INSTALL_DIR", ".asdf/installs/python", ".local/share/mise"):
             self.assertIn(cand, finder)
         # every launcher shares the one finder instead of keeping its own list
         for text in (etk, selftest, (ROOT / "hooks" / "run-guard.sh").read_text(),

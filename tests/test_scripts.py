@@ -978,6 +978,20 @@ class LauncherPythonTests(unittest.TestCase):
                            capture_output=True, text=True, timeout=30)
         self.assertIn("FAKE pyenv-3.12.8", r.stdout, r.stderr)
 
+    def test_pyenv_root_and_uv_dir_overrides_are_searched(self):
+        script = self.without_absolute_pythons(ROOT / "scripts" / "etk.sh")
+        for var, rel in (("PYENV_ROOT", "versions/3.12.1/bin"), ("UV_PYTHON_INSTALL_DIR", "cpython-3.12.2/bin")):
+            with self.subTest(var=var):
+                base = self.tmp / var.lower()
+                found = base / rel
+                found.mkdir(parents=True)
+                (found / "python3").write_text("#!/bin/sh\n[ \"$1\" = -c ] && exit 0\necho FAKE custom \"$@\"\n")
+                (found / "python3").chmod(0o755)
+                env = {"PATH": str(self.bin), "HOME": str(self.tmp / "empty"), var: str(base)}
+                r = subprocess.run(["/bin/sh", str(script), "run", "latest"], env=env, capture_output=True,
+                                   text=True, timeout=30)
+                self.assertIn("FAKE custom", r.stdout, r.stderr)
+
     def test_etk_launcher_names_the_requirement_when_none_qualifies(self):
         self.fake_python("python3", version_ok=False)
         self.fake_python("python", version_ok=False)
