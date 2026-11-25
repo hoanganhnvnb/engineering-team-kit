@@ -13,10 +13,12 @@ also type `/engineering-team:team <task>`.
 
 ```text
 fix the cart total rounding bug; when review and tests pass, commit and push
-thêm export CSV cho báo cáo đơn hàng, review pass thì tạo PR
-fix bug login timeout, reviewer xong không lỗi và pass thì deploy staging luôn
-tiếp tục
+add CSV export to the orders report; open a PR once review passes
+fix the login timeout; if review finds nothing and tests pass, deploy to staging too
+continue
 ```
+
+Requests work in any language; the Lead replies in yours.
 
 Claude first prints a one-line plan, such as
 `Plan: fix → review → test → commit+push (fix/cart-rounding) → PR → deploy staging [pre-authorized]`,
@@ -35,7 +37,7 @@ and then works through it without checking in.
 
 The run stops before the next outward step on INCOMPLETE or BLOCKED, when the cycle cap
 is hit, or when a hook, CI or deploy fails. Nothing is pushed while gates are failing.
-`tiếp tục` / `continue` resumes an unfinished run from its recorded phase.
+`continue` (in any language) resumes an unfinished run from its recorded phase.
 
 ## Your workflow profile
 
@@ -52,7 +54,7 @@ deploy candidates. It then asks only the rest, in at most two short rounds of
 questions: branch model, commit and push automatically or ask, PR or direct merge, merge method,
 wait for CI, and deploy targets. If you don't describe a deploy, deploy is skipped.
 
-To change a habit, just say it ("từ giờ tạo PR thay vì merge thẳng"). The Lead updates
+To change a habit, just say it ("from now on, open a PR instead of merging directly"). The Lead updates
 that field and tells you. To see or reset the profile:
 
 ```bash

@@ -132,7 +132,7 @@ runner's allowlist.
 
 | # | Request | `team` used | Agents | Pushed | Deployed | Ledger check | Independent re-run | Time / cost |
 |---|---|---|---|---|---|---|---|---|
-| S1 | fix the qty bug; "khi review và test pass thì commit, push và deploy staging luôn" | yes | 2 × fresh code-reviewer | yes | yes, verify step passed | OK | `npm test` exit 0 (8 tests) | 230 s / $1.60 |
+| S1 | fix the qty bug; "once review and tests pass, commit, push and deploy staging" (asked in Vietnamese) | yes | 2 × fresh code-reviewer | yes | yes, verify step passed | OK | `npm test` exit 0 (8 tests) | 230 s / $1.60 |
 | S2 | fix the qty bug; review and test it, commit and push when it passes | yes | 2 × fresh code-reviewer | yes | no (not asked) | OK | `npm test` exit 0 | 219 s / $1.58 |
 | S3 | fix the qty bug, but don't push | no | code-reviewer | no | no | none (no ledger) | `npm test` exit 0 | 65 s / $0.62 |
 

@@ -38,7 +38,7 @@ claude plugin install engineering-team@engineering-team-kit
 Restart Claude Code, open a project, and ask for something:
 
 ```text
-add CSV export to the orders report; review pass thì tạo PR
+add CSV export to the orders report; open a PR once review passes
 ```
 
 On the first run in a project, Claude detects your git host, branches and commit style.
