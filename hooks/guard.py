@@ -1044,6 +1044,12 @@ for _alias, _base in {"pnpm": "npm", "yarn": "npm", "bun": "npm", "pip3": "pip",
 QA_GIT = {"add", "commit"}
 
 
+GIT_RUNS_PROGRAM = re.compile(r"^--(upload-pack|receive-pack|exec|open-files-in-pager|ext-diff|textconv)(=.*)?$")
+GIT_ENV_HOOKS = re.compile(r"^(GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+|GIT_CONFIG_PARAMETERS|"
+                           r"GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_EXTERNAL_DIFF|GIT_SSH|GIT_SSH_COMMAND|GIT_PAGER|"
+                           r"GIT_ASKPASS|GIT_PROXY_COMMAND|GIT_EDITOR|GIT_SEQUENCE_EDITOR|GIT_EXEC_PATH)=")
+
+
 def git_read_only_reason(args: list[str], qa: bool = False) -> str | None:
     """Why this git command isn't read-only, or None. Subcommands outside an allowlist are refused."""
     i, globs = 0, []
@@ -1057,6 +1063,9 @@ def git_read_only_reason(args: list[str], qa: bool = False) -> str | None:
     sub, rest = args[i], args[i + 1:]
     if any(a == "--output" or a.startswith("--output=") for a in rest):
         return f"`git {sub} --output` writes a file"
+    if any(GIT_RUNS_PROGRAM.match(a) for a in rest) or (sub == "grep" and any(
+            a == "-O" or (a.startswith("-O") and not a.startswith("--")) for a in rest)):
+        return f"`git {sub}` option that runs an external program"
     if sub in GIT_READ or (qa and sub in QA_GIT):
         return None
     if qa and sub == "worktree" and rest[:1] in (["add"], ["remove"], ["list"]):
@@ -1203,6 +1212,8 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         if pending and not in_pipe and seg.sep in {";", "||"}:
             cur, dirs[:], pending = None, ["?"], False
         check_startup_hook_vars(seg.words, words)
+        if (read_only or role == "qa-engineer") and any(GIT_ENV_HOOKS.match(w) for w in seg.words):
+            raise Blocked(f"{role} may not set git environment that runs programs or changes config")
         if (read_only or role == "qa-engineer") and any(SNAPSHOT_ENV.match(w) for w in seg.words):
             raise Blocked(f"{role} may not rewrite test snapshots")
         first = os.path.basename(words[0]) if words else ""

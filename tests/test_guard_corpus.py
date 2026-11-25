@@ -848,8 +848,38 @@ FIND_WRITES = (
        ("qa", "find . -fprint tests/new-list.txt", "allow")]
 )
 
+# Allowlisted git subcommands must not be told to run programs.
+GIT_RUNS_PROGRAMS = (
+    [(r, c, "block") for r in ("rev", "qa") for c in [
+        "git ls-remote --upload-pack='touch x' origin",
+        "git ls-remote --upload-pack=x origin",
+        "git grep --open-files-in-pager=sh foo",
+        "git grep -O foo",
+        "git grep -Osh foo",
+        "git diff --ext-diff",
+        "git log --textconv",
+        "git show --textconv HEAD:a",
+        "git ls-remote --exec=x origin",
+        "GIT_CONFIG_COUNT=1 git log",
+        "GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0=x git log",
+        "GIT_CONFIG_PARAMETERS=x git log",
+        "GIT_EXTERNAL_DIFF=x git diff",
+        "GIT_SSH_COMMAND=x git ls-remote origin",
+        "GIT_SSH=x git ls-remote origin",
+        "GIT_PAGER=x git log",
+        "env GIT_PAGER=x git log",
+    ]]
+    + [(r, c, "allow") for r in ("rev", "qa") for c in [
+        "git grep -n foo",
+        "git grep --count foo",
+        "git diff --stat",
+        "git log --oneline",
+        "git ls-remote origin",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS)
 
 
 def make_project(base: Path) -> Path:
