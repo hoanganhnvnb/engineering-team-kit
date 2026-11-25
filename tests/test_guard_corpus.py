@@ -1437,6 +1437,12 @@ class GuardCorpus(unittest.TestCase):
                 data = {"tool_name": "Bash", "tool_input": {"command": f"echo x > {home}/.local/bin/py*"},
                         "cwd": str(self.project), "agent_type": ROLES["dev"]}
                 self.assertIsNotNone(guard.decide(data))
+                link = Path(tmp).resolve() / "lnk"
+                link.symlink_to(home)  # a symlink to the home folder hides the prefix
+                for cmd in (f"echo x > {home}/x*/../.claude/settings.json", f"echo x > {link}/.cl*/settings.json"):
+                    data["tool_input"]["command"] = cmd
+                    with self.subTest(cmd=cmd):
+                        self.assertIsNotNone(guard.decide(data))
                 for cmd in (f"echo x > {home}/*/*/*/f", f"echo x > {home}/**/f"):  # could walk the whole home
                     data["tool_input"]["command"] = cmd
                     with self.subTest(cmd=cmd):

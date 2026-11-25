@@ -1125,9 +1125,11 @@ def in_tool_home(path: str, cur: str | None) -> bool:
     on_path = {d for d in on_path if d.startswith(h + os.sep)}
     cands = [full]
     if re.search(r"[*?\[]", full):  # the shell expands these; look at every file they could name
-        parts = os.path.normpath(full).split(os.sep)
+        parts = full.split(os.sep)  # as written: normpath would fold a `..` that follows a wildcard
         wild = [i for i, c in enumerate(parts) if re.search(r"[*?\[]", c)]
-        prefix = os.sep.join(parts[:wild[0]]).lower() or os.sep
+        if ".." in parts[wild[0]:]:
+            return True  # `x*/../.claude`: where it lands depends on what the wildcard matches
+        prefix = os.path.realpath(os.sep.join(parts[:wild[0]]) or os.sep).lower()  # symlinks resolved
         guarded = whole + [os.path.join(h, f) for f in TOOL_HOME_FILES] + sorted(on_path)
         # Only a pattern that can reach a guarded folder needs expanding. Those with `**` or more than
         # two wildcard parts could walk a huge tree inside the hook's time limit: block them.
