@@ -734,6 +734,18 @@ class DiscoverTests(unittest.TestCase):
             self.assertIn("Uncommitted changes (do not overwrite)", out)
             self.assertIn("wip.txt", out)
 
+    def test_outside_git_dependency_dirs_are_skipped_at_any_depth(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            for name, content in {"web/node_modules/pkg/test/x.test.js": "x", "src/a.js": "y",
+                                  "skills/build/SKILL.md": "---\nname: build\ndescription: d\n---\n"}.items():
+                (d / name).parent.mkdir(parents=True, exist_ok=True)
+                (d / name).write_text(content)
+            out = sh([sys.executable, str(DISCOVER)], d).stdout
+        self.assertIn("tests: ✗", out)
+        self.assertNotIn("node_modules", out)
+        self.assertIn("`build`", out)  # a skill named like a build dir is still found
+
     def test_never_fails_outside_git(self):
         with tempfile.TemporaryDirectory() as tmp:
             r = sh([sys.executable, str(DISCOVER)], tmp)

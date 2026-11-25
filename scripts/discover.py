@@ -58,8 +58,8 @@ def walk(root: Path, max_depth: int):
     """Yield (dir, filenames) down to max_depth.
 
     Inside git the file list comes from git, so ignore rules decide what is skipped and a
-    tracked `skills/build/` is never mistaken for build output. Without git, SKIP_DIRS applies
-    to top-level directories only.
+    tracked `skills/build/` is never mistaken for build output. Without git, SKIP_DIRS names
+    are skipped at any depth, except directly under a `skills/` directory.
     """
     listed = git_files(root)
     if listed is not None:
@@ -79,7 +79,7 @@ def walk(root: Path, max_depth: int):
         here = Path(dirpath).relative_to(root)
         dirnames[:] = [
             d for d in dirnames
-            if (here / d).as_posix() not in SKIP_DIRS
+            if (here / d).as_posix() not in SKIP_DIRS and (d not in SKIP_DIRS or here.name == "skills")
         ]
         if len(Path(dirpath).parts) - root_depth >= max_depth:
             dirnames[:] = []
