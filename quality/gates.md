@@ -112,7 +112,9 @@ scopes).
    that may stay `NOT_RUN`, and the report says they weren't checked.
 2. Every acceptance criterion is `met`.
 3. No critical/high finding is `open`, `disputed`, or `fixed` but unverified, and no
-   medium finding is `open` or `disputed`.
+   medium finding is `open` or `disputed`. The one exception is a report-only `review` run,
+   which may finish with open mediums as long as the report lists them. `invalid` findings
+   (with a `resolution`) never block.
 4. `accepted_risk` or `wont_fix` on a critical/high finding has `accepted_by_user: true`,
    meaning the user actually said so in this conversation. The Lead cannot accept risk
    for the user.

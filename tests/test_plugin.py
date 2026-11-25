@@ -103,6 +103,10 @@ class PluginStructure(unittest.TestCase):
         self.assertIn("quality/gates.md", text)
         self.assertIn("it fills G5", text)
 
+    def test_gates_doc_matches_checker_on_open_mediums(self):
+        gates = " ".join((ROOT / "quality" / "gates.md").read_text().split())
+        self.assertIn("report-only `review` run, which may finish with open mediums", gates)
+
     def test_versions_agree(self):
         entry = next(p for p in MARKET["plugins"] if p["name"] == NAME)
         self.assertEqual(entry.get("version"), PLUGIN["version"])
