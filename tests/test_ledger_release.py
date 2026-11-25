@@ -439,8 +439,7 @@ class ReleaseLedgerTests(unittest.TestCase):
                      "--options", "yes|no", "--recommended", "no", str(run))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("still pending", self.complete(run).stdout)
-        r = self.etk("decide", "--id", "D1", "--level", "L4", "--question", "Drop the legacy table?",
-                     "--status", "approved", "--answer-quote", "no, keep it", str(run))
+        r = self.etk("decide", "--id", "D1", "--status", "approved", "--answer-quote", "no, keep it", str(run))
         self.assertEqual(r.returncode, 0, r.stderr)
         d = self.ledger(run)["decisions"]
         self.assertEqual(len(d), 1)
@@ -451,6 +450,14 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.write(run, led)
         self.assertEqual(self.check(run).returncode, 0, self.check(run).stdout)
         self.assertEqual(self.etk("decide", "--id", "D2", "--level", "L9", "--question", "x", str(run)).returncode, 2)
+        before = (run / "gates.json").read_text()
+        for args in (("--id", "D2", "--status", "approved"), ("--id", "D2", "--level", "L3"),
+                     ("--id", "D2", "--question", "x"), ("--id", "D1", "--question", " ")):
+            r = self.etk("decide", *args, str(run))
+            self.assertEqual(r.returncode, 2, args)
+            self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual((run / "gates.json").read_text(), before)
+        self.assertEqual((d[0]["level"], d[0]["question"]), ("L4", "Drop the legacy table?"))
 
     def test_l4_decision_needs_the_users_answer(self):
         run, _ = self.init("--kind", "ship")

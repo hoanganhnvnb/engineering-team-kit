@@ -12,8 +12,8 @@
     etk_run.py authorize --action A --source S --quote "Q" [--target T] [--condition C] [--data DIR] [RUN]
     etk_run.py act --action A [--target T] [--ref R] [--url U] [--command C] --exit N [--production]
                    [--data DIR] [--force-record] [RUN]
-    etk_run.py decide --id ID --level L0..L4 --question Q [--options "a|b"] [--recommended R]
-                      [--status S] [--answer-quote Q] [RUN]
+    etk_run.py decide --id ID [--level L0..L4 --question Q] [--options "a|b"] [--recommended R]
+                      [--status S] [--answer-quote Q] [RUN]     # level and question: new ids only
 
 Without a path, the newest run under `.etk/runs/` is used. Runs that git tracks, symlinks
 and future-dated run names are never picked, and explicit paths must lie inside `.etk/runs/`.
@@ -873,22 +873,27 @@ def cmd_act(a) -> int:
 
 
 def cmd_decide(a) -> int:
-    if not a.id.strip() or not a.question.strip():
+    if not a.id.strip() or (a.question is not None and not a.question.strip()):
         refuse("--id and --question must not be empty")
 
     def change(led):
         decisions = ledger_list(led, "decisions")
         d = next((x for x in decisions if isinstance(x, dict) and x.get("id") == a.id), None)
         if d is None:
+            if a.level is None or a.question is None:
+                refuse(f"decision {a.id} is new: it needs --level and --question")
             d = {"id": a.id, "status": "pending"}
             decisions.append(d)
-        d.update(level=a.level, question=a.question, at=now_iso())
+        for key, val in (("level", a.level), ("question", a.question)):
+            if val is not None:
+                d[key] = val
+        d["at"] = now_iso()
         if a.options is not None:
             d["options"] = [o.strip() for o in a.options.split("|") if o.strip()]
         for key, val in (("recommended", a.recommended), ("status", a.status), ("answer_quote", a.answer_quote)):
             if val is not None:
                 d[key] = val
-        return f"decision {a.id} [{a.level}] {d['status']}"
+        return f"decision {a.id} [{d.get('level')}] {d.get('status')}"
     return update_ledger(a.path, change)
 
 
@@ -1130,8 +1135,8 @@ def main() -> int:
                     help="record a step that already happened although `ready` fails (gates_ok false)")
     de = sub.add_parser("decide", help="record or update a decision by id")
     de.add_argument("--id", required=True)
-    de.add_argument("--level", required=True, choices=sorted(DECISION_LEVELS))
-    de.add_argument("--question", required=True)
+    de.add_argument("--level", default=None, choices=sorted(DECISION_LEVELS), help="required for a new id")
+    de.add_argument("--question", default=None, help="required for a new id")
     de.add_argument("--options", default=None, help='"a|b|c"')
     de.add_argument("--recommended", default=None)
     de.add_argument("--status", default=None, choices=sorted(DECISION_STATUSES))

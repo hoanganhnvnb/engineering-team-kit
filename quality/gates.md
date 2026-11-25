@@ -130,6 +130,7 @@ etk.sh run act --action merge --target main --ref abc123 --url <pr> --command "g
 etk.sh run act --action deploy --target web-eu --production --data "${CLAUDE_PLUGIN_DATA}" --exit 0
 etk.sh run decide --id D1 --level L4 --question "Drop the legacy table?" --options "yes|no" --recommended no \
                   [--status pending|approved|autonomous|superseded] [--answer-quote "no, keep it"]
+etk.sh run decide --id D1 --status approved --answer-quote "no, keep it"   # update: level/question optional
 ```
 
 Each takes an optional trailing run path. New ledger fields: `phase`, `phase_history`,
