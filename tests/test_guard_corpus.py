@@ -1443,6 +1443,14 @@ class GuardCorpus(unittest.TestCase):
                     data["tool_input"]["command"] = cmd
                     with self.subTest(cmd=cmd):
                         self.assertIsNotNone(guard.decide(data))
+                proj = home / "proj"
+                proj.mkdir()
+                (proj / "lnk").symlink_to(home / ".claude")  # a symlink inside the wildcard part
+                for cmd in (f"echo x > {proj}/*/settings.json", f"echo x > {home}/.c*/.*/x",
+                            f"echo x > {home}/pr*/.*/.claude/settings.json"):
+                    data["tool_input"]["command"] = cmd
+                    with self.subTest(cmd=cmd):
+                        self.assertIsNotNone(guard.decide(data))
                 for cmd in (f"echo x > {home}/*/*/*/f", f"echo x > {home}/**/f"):  # could walk the whole home
                     data["tool_input"]["command"] = cmd
                     with self.subTest(cmd=cmd):

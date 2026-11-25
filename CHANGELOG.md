@@ -7,7 +7,9 @@ All notable changes to this plugin. Versions follow semver; the version in
 
 - Guard: a wildcard pattern is expanded only when it can reach `~/.claude` or a Python folder;
   `**` or more than two wildcard parts there is blocked, so a pattern can't stall the hook.
-  The pattern's fixed part is resolved through symlinks first, and a `..` after a wildcard is blocked.
+  Patterns with up to two wildcard parts are always expanded and every match is checked, so a
+  symlink inside the wildcard can't hide a guarded folder. A `..` after a wildcard, or a part such
+  as `.*` that can match it, is blocked.
 
 ## 0.5.0
 

@@ -87,6 +87,9 @@ Honest list. If one of these bites you, an issue is welcome.
   name in a PATH folder under your home (`~/.local/bin/python*`), or the pyenv, uv, asdf and mise
   Python and shim folders, because those decide what runs for you and for
   the guard. Same limit as above: judged by the path the command names.
+  Wildcards are expanded (at most 256 matches, two wildcard parts, no `**`); a deeper pattern
+  is blocked only when its fixed part leads into those folders, so a symlink hidden inside a deep
+  wildcard part gets through.
 - **`etk exec` keeps the command's hands off the ledger, not off the file.** The command
   `exec` runs is repository code (a test suite). `exec` snapshots the ledger first and
   afterwards restores everything but appended gate command records, so a test can't add

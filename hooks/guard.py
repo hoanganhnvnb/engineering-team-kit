@@ -1127,16 +1127,19 @@ def in_tool_home(path: str, cur: str | None) -> bool:
     if re.search(r"[*?\[]", full):  # the shell expands these; look at every file they could name
         parts = full.split(os.sep)  # as written: normpath would fold a `..` that follows a wildcard
         wild = [i for i, c in enumerate(parts) if re.search(r"[*?\[]", c)]
-        if ".." in parts[wild[0]:]:
-            return True  # `x*/../.claude`: where it lands depends on what the wildcard matches
-        prefix = os.path.realpath(os.sep.join(parts[:wild[0]]) or os.sep).lower()  # symlinks resolved
-        guarded = whole + [os.path.join(h, f) for f in TOOL_HOME_FILES] + sorted(on_path)
-        # Only a pattern that can reach a guarded folder needs expanding. Those with `**` or more than
-        # two wildcard parts could walk a huge tree inside the hook's time limit: block them.
-        if any(g == prefix or g.startswith(prefix.rstrip(os.sep) + os.sep) or prefix.startswith(g + os.sep)
-               for g in guarded):
-            if "**" in full or len(wild) > 2:
+        # `..`, or a part that can match it (`.*`, `.[.]`): where it lands depends on the matches.
+        if any(c == ".." or (c.startswith((".", "[")) and fnmatch.fnmatchcase("..", c)) for c in parts[wild[0]:]):
+            return True
+        if "**" in full or len(wild) > 2:
+            # Too deep to expand inside the hook's time limit. Block it when its fixed part (symlinks
+            # resolved) is, or leads into, a guarded folder. A symlink inside a deep wildcard part is a
+            # known gap (docs/limitations.md).
+            prefix = os.path.realpath(os.sep.join(parts[:wild[0]]) or os.sep).lower()
+            guarded = whole + [os.path.join(h, f) for f in TOOL_HOME_FILES] + sorted(on_path)
+            if any(g == prefix or g.startswith(prefix.rstrip(os.sep) + os.sep) or prefix.startswith(g + os.sep)
+                   for g in guarded):
                 return True
+        else:  # at most two wildcard parts: expand, and judge every file they name
             found = list(itertools.islice(glob.iglob(full), GLOB_CAP + 1))
             if len(found) > GLOB_CAP:
                 return True  # too many to judge: block rather than guess
