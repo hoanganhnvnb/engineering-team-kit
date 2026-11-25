@@ -750,6 +750,24 @@ def write_operands(prog: str, args: list[str]) -> list[str]:
     return ops  # rm, mv (sources disappear too), chmod, chown, touch, truncate, tee, patch
 
 
+def dest_operands(prog: str, args: list[str]) -> list[str]:
+    """Files a shell writer creates or overwrites (not the ones it only reads or removes)."""
+    write_operands(prog, args)  # raises on target-directory spellings it can't follow
+    ops = [a for a in args if not a.startswith("-")]
+    if prog == "dd":
+        return [a[3:] for a in args if a.startswith("of=")]
+    if prog in {"cp", "install", "ln", "mv"}:
+        for i, a in enumerate(args):
+            d = args[i + 1] if a in {"-t", "--target-directory"} and i + 1 < len(args) else (
+                a.split("=", 1)[1] if a.startswith("--target-directory=") else None)
+            if d is not None:
+                return [d] + [os.path.join(d, os.path.basename(x)) for x in ops if x != d]
+        return ops[-1:]
+    if prog in {"tee", "touch", "patch", "truncate"}:
+        return ops
+    return []
+
+
 def writes_existing(target: str, root: str, cur: str | None) -> bool:
     path = absjoin(target, cur)
     return path is None or (os.path.exists(path) and not scratch(path, root, cur))
@@ -959,6 +977,13 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
     if prog == "find":
         check_find(words[1:], root, role, depth, cur)
     check_deploy(words)
+    targets = dest_operands(prog, words[1:]) if prog in SHELL_WRITERS else []
+    if prog == "sed" and any(w == "--in-place" or w.startswith(("--in-place=", "-i")) for w in words[1:]) \
+            or (re.match(r"^(perl|ruby)[\d.]*$", prog) and any(PERL_INPLACE.match(w) for w in words[1:])):
+        targets = [w for w in words[1:] if not w.startswith("-")]
+    for t in targets:
+        if is_secret(t):
+            raise Blocked(f"writing to `{t}` (looks like a secrets file)")
     if prog == "git":
         check_git(words[1:], root, cur)
     if prog == "rm":

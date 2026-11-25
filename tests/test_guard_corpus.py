@@ -651,8 +651,38 @@ DEPLOY_FORMS = (
     ]]
 )
 
+# R1-6: shell writers and in-place edits must not create or change secret files.
+SECRET_WRITES = (
+    [(r, c, "block") for r in ("dev", "qa") for c in [
+        "cp x .env",
+        "cp x config/key.pem",
+        "mv x .env.local",
+        "mv -t . x.env y/.env.prod",
+        "tee .env",
+        "echo x | tee -a .env",
+        "echo x | tee /tmp/a .env",
+        "install -m 600 x .env",
+        "ln -s x .env",
+        "dd if=x of=.env",
+        "touch .env",
+        "sed -i s/a/b/ .env",
+        "perl -pi -e 's/a/b/' .env",
+    ]]
+    + [("dev", c, "allow") for c in [
+        "cp .env .env.example",
+        "cp .env /tmp/backup.env",
+        "tee /tmp/a < x",
+        "cp src/a.js src/b.js",
+        "mv .env.example .env.sample",
+        "sed -i s/a/b/ src/a.js",
+        "tee .env.example",
+        "cat .env",
+    ]]
+    + [("rev", "tee /tmp/a < x", "allow"), ("rev", "cat x | tee /tmp/a", "allow")]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES)
 
 
 def make_project(base: Path) -> Path:
