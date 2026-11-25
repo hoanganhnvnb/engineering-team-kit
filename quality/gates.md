@@ -1,8 +1,13 @@
 # Quality gates
 
-Six gates. Each one ends in exactly one status, and every status carries evidence
-or a reason. The ledger (`.etk/runs/<id>/gates.json`) holds them, and
-`scripts/etk_run.py check` refuses an inconsistent ledger.
+Seven gates (G7 only for `ship` runs). Each one ends in exactly one status, and every
+status carries evidence or a reason. The ledger (`.etk/runs/<id>/gates.json`) holds them,
+and `scripts/etk_run.py check` refuses an inconsistent ledger.
+
+Without a path, `check`/`render`/`exec`/`latest` use the newest run this session could have
+made: never a symlink, a future-dated run name, or a ledger git tracks. If `.etk` or
+`.etk/runs` is a symlink, or git tracks anything under `.etk/`, `init` and the no-path
+commands refuse (exit 2). An explicit path must lie inside the repo's real `.etk/runs/`.
 
 | Status | Meaning | Needs |
 |---|---|---|
@@ -109,12 +114,49 @@ scopes).
   changes (auth, payments, permissions, crypto, user data) the reviewer must say so
   explicitly and the run is at least medium mode.
 
+## G7: Release
+
+Only a `ship` run (implement + review + test + release) owns G7; other kinds may leave it
+`NOT_RUN`, and ledgers from before G7 may lack it. The Lead commits, pushes, opens the PR,
+merges, tags or deploys only as the user's permission and the workflow profile allow, and
+records each step:
+
+```sh
+etk.sh run phase release                         # intake|implement|review|test|release|deploy|report|done
+etk.sh run authorize --action merge --source prompt --quote "merge it when green" [--target main] [--condition pass]
+etk.sh run act --action merge --target main --ref abc123 --url <pr> --command "gh pr merge 12" --exit 0
+etk.sh run act --action deploy --target web-eu --production --exit 0
+etk.sh run decide --id D1 --level L4 --question "Drop the legacy table?" --options "yes|no" --recommended no \
+                  [--status pending|approved|autonomous|superseded] [--answer-quote "no, keep it"]
+```
+
+Each takes an optional trailing run path. New ledger fields: `phase`, `phase_history`,
+`authorizations` (`action`, `target`, `source`, `quote`, `condition`, `granted_at`),
+`actions` (`action`, `target`, `ref`, `url`, `command`, `exit`, `production`, `at`,
+`gates_ok`), `decisions` (upserted by `id`) and `profile_hash` (informational). Actions:
+`commit|push|pr|merge|tag|deploy|rollback`. Sources: `prompt` / `answer` (the user's verbatim
+words in `quote`) or `profile` (the workflow profile; only for commit, push, pr).
+`gates_ok` is computed by `act`: G1–G6 settled, ACs met, no blocking finding.
+
+`check` rejects:
+- an action with no authorization for the same action and target (an authorization without
+  a target covers any target; one granted after the action covers nothing);
+- a commit/push/pr/merge/tag/deploy with `gates_ok: false`: released before the gates passed
+  (rollback is exempt);
+- a merge/tag/deploy/rollback authorized only by the profile;
+- a `--production` deploy whose quote names neither the target nor production/prod/live.
+
+- PASS: at least one recorded action, every one exit 0.
+- FAIL: an action failed.
+- NOT_APPLICABLE: with the reason (no VCS, the user said to leave it uncommitted), and no
+  recorded actions.
+
 ## When is a run COMPLETE
 
 `outcome: COMPLETE` only when:
 
 1. No gate is `FAIL` or `BLOCKED`, and no gate the run owns is `NOT_RUN`. build/fix/improve-ui
-   own all six. A `review` run owns G2 + G6, a `test` run owns G3 + G4. Gates outside
+   own G1–G6, `ship` owns all seven. A `review` run owns G2 + G6, a `test` run owns G3 + G4. Gates outside
    that may stay `NOT_RUN`, and the report says they weren't checked.
 2. Every acceptance criterion is `met`.
 3. No critical/high finding is `open`, `disputed`, or `fixed` but unverified, and no
@@ -124,6 +166,7 @@ scopes).
 4. `accepted_risk` or `wont_fix` on a critical/high finding has `accepted_by_user: true`,
    meaning the user actually said so in this conversation. The Lead cannot accept risk
    for the user.
+5. No release action exited non-zero, and no L4 decision is still `pending`.
 
 Otherwise the outcome is `INCOMPLETE` (work remains) or `BLOCKED` (needs the user),
 and the report says exactly what is missing.
