@@ -7,6 +7,38 @@ commands add entries to your settings without overwriting what's there.
 Requirements: Claude Code with plugin support (built and tested on 2.1.329), `git`, and
 Python 3.12+ (the scripts and hook use the standard library only). It is found on `PATH` (`python3`, `python3.13`, `python3.12`), in the usual system folders, or in the folders pyenv, uv, asdf and mise install to. If yours lives somewhere else, set `ETK_PYTHON=/path/to/python3.12`. Without one, the plugin's subagents are blocked by the guard until you install Python or disable the plugin, and the error message says how.
 
+## If Python 3.12+ is not found
+
+The plugin needs it for its scripts and for the guard hook. Without it:
+
+- The main session keeps working. Other plugins are not affected.
+- The plugin's subagents are blocked (the guard fails closed), and the `team`, `build`,
+  `fix` and the other commands show "Python 3.12+ not found" where the snapshot should be.
+
+Fix it in one of these ways:
+
+1. **Install it.** `brew install python@3.12`, `sudo apt install python3.12`,
+   `uv python install 3.12` or `pyenv install 3.12`. Restart Claude Code.
+2. **Point to it.** If it is installed somewhere the plugin does not look, add this to
+   `~/.claude/settings.json` and restart:
+
+   ```json
+   { "env": { "ETK_PYTHON": "/full/path/to/python3.12" } }
+   ```
+
+   A path that doesn't run, or is older than 3.12, is skipped. The plugin then falls
+   back to its normal search.
+3. **Turn the plugin off** for now: `claude plugin disable engineering-team@engineering-team-kit`.
+
+Limits:
+
+- It looks only at `PATH`, the system folders, `$ETK_PYTHON` and the pyenv, uv, asdf and
+  mise folders under your home. conda or a custom location needs `ETK_PYTHON`.
+- It never downloads or installs Python, and never searches the project folder.
+- Native Windows isn't supported (the launchers are `sh`); use WSL.
+- If you can't install 3.12, there is no reduced mode. The guard is what lets subagents
+  run safely, so the plugin stays off rather than run without it.
+
 ## 1. Install for yourself (all projects)
 
 ```bash

@@ -140,7 +140,8 @@ Honest list. If one of these bites you, an issue is welcome.
   never searched. Without a suitable Python, calls from the plugin's subagents are blocked with
   "engineering-team needs Python 3.12+ for its guard; install it or disable the plugin" plus the
   install options (the guard fails closed); the main session is unaffected. The snapshot step
-  fails visibly. Nothing is downloaded or installed for you.
+  fails visibly. Nothing is downloaded or installed for you, and there is no reduced mode without
+  Python. conda and custom locations need `ETK_PYTHON` (see [install.md](install.md)).
 - Inline-code detection for read-only roles (`node -e`, `python -c` writing files) is a
   pattern match on common write calls, not an interpreter. It catches mistakes, not intent.
   Blocking inline code outright wouldn't close the gap (a script in the temp dir runs the
