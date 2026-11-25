@@ -793,12 +793,8 @@ def profile_says_auto(prof: dict, action: str) -> str | None:
 
 def profile_unconfirmed(prof: dict) -> str | None:
     """Why the profile's settings aren't confirmed by the developer, or None when they are."""
-    try:
-        confirmed = dt.datetime.fromisoformat(prof["confirmed_at"])
-        updated = dt.datetime.fromisoformat(prof["updated_at"])
-        if confirmed >= updated:
-            return None
-    except (KeyError, TypeError, ValueError):
+    stored = prof.get("confirmed_hash")
+    if not prof.get("confirmed_at") or not isinstance(stored, str):
         return "it was never confirmed (`profile confirm`)"
     return "it changed after it was last confirmed; show it to the developer and run `profile confirm`"
 

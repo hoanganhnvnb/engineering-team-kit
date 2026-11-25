@@ -374,6 +374,18 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.write(run, led)
         self.assertEqual(self.check(run).returncode, 0, self.check(run).stdout)
 
+    def test_hand_edited_profile_needs_a_new_confirm(self):
+        run, _ = self.init("--kind", "ship")
+        self.profile("set", "release.push", "confirm")
+        self.profile("confirm")
+        path = Path(self.profile("path").strip())
+        prof = json.loads(path.read_text())
+        prof["release"]["push"] = "auto"
+        path.write_text(json.dumps(prof))
+        r = self.etk("authorize", "--action", "push", "--source", "profile", "--data", str(self.data), str(run))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("changed after it was last confirmed", r.stderr)
+
     def test_merge_needs_users_words_not_profile(self):
         run = self.ship_run()
         led = self.ledger(run)

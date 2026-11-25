@@ -71,7 +71,7 @@ STRINGS = {"branches.default", "branches.base", "branches.name_pattern", "commit
            "commit.language"}
 OBJECTS = {"vcs", "host", "branches", "commit", "release", "release.pr", "release.merge", "deploy"}
 TARGET_KINDS = {"command", "ci-on-merge", "ci-on-tag", "manual"}
-READ_ONLY_KEYS = {"schema", "project", "updated_at", "confirmed_at"}
+READ_ONLY_KEYS = {"schema", "project", "updated_at", "confirmed_at", "confirmed_hash"}
 SEGMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 
 
@@ -468,6 +468,16 @@ def stamp(prof: dict, ident: dict, rebind: bool = False) -> dict:
     return prof
 
 
+UNHASHED = {"memory", "updated_at", "confirmed_at", "confirmed_hash"}
+
+
+def settings_hash(prof: dict) -> str:
+    """What `confirm` approves: every setting, but not notes or timestamps. Any later change to the
+    file, by `set` or by hand, gives another hash and so needs a new confirm."""
+    body = {k: v for k, v in prof.items() if k not in UNHASHED}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
 def checkout_mismatch(prof: dict, ident: dict) -> bool:
     """True when the stored profile was set up in another checkout or for another push URL.
 
@@ -813,6 +823,7 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "confirm":
             prof = stamp(load(path), ident, rebind=True)
             prof["confirmed_at"] = prof["updated_at"]
+            prof["confirmed_hash"] = settings_hash(prof)
             save(path, prof, data)
             print(f"confirmed {path}")
         elif a.cmd == "remember":
