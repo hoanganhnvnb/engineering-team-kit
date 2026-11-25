@@ -134,6 +134,16 @@ class PluginStructure(unittest.TestCase):
         self.assertTrue(built_on, "README must say which Claude Code version it was built on")
         self.assertIn(f"@anthropic-ai/claude-code@{built_on.group(1)}", ci)
 
+    def test_docs_state_the_python_minimum_and_the_selftest_command(self):
+        for name in ("README.md", "docs/install.md", "docs/limitations.md"):
+            text = (ROOT / name).read_text()
+            with self.subTest(doc=name):
+                self.assertNotIn("3.8", text)
+                self.assertRegex(text, r"3\.12\+|≥ 3\.12")
+        readme = (ROOT / "README.md").read_text()
+        self.assertIn("bash scripts/selftest.sh", readme)
+        self.assertNotIn("./scripts/selftest.sh", readme)
+
     def test_versions_agree(self):
         entry = next(p for p in MARKET["plugins"] if p["name"] == NAME)
         self.assertEqual(entry.get("version"), PLUGIN["version"])

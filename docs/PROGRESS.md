@@ -29,7 +29,8 @@ Running log of building ETK itself. Newest state at the top of each phase.
 | Phase | Status | Notes |
 |---|---|---|
 | 15. Guard rewrite | done | `hooks/guard.py` tokenizes and parses the shell command (quotes, heredocs, nested shells, `cd` tracking) instead of matching patterns; adds `protected_paths` from project config, fails closed on its own errors, blocks env/sudo options that change directory. Still a best-effort tripwire, see [limitations.md](limitations.md). |
-| 16. Independent review fixes | done | Ledger: `invalid` finding status, report-only reviews may finish with open mediums, no crash on same-second `init` or malformed `render` input; `discover.py` no longer hides skills named `build`/`test`; reviewer ID prefixes; skill wording aligned with routing and gates. |
+| 16. Independent review fixes | done | Ledger: `invalid` finding status, report-only reviews may finish with open mediums, no crash on same-second `init` or malformed `render` input; `discover.py` no longer hides skills named `build`/`test`; reviewer ID prefixes; `etk.sh exec` records real exit codes; portable `evals/run.sh`; skill wording aligned with routing and gates. |
+| 17. Python 3.12+ | done | Minimum Python raised to 3.12: launchers pick a 3.12+ interpreter, CI runs 3.12 on Linux and macOS, docs updated. |
 
 ## Decisions made along the way
 

@@ -5,7 +5,7 @@ installer script and never edits your settings files by hand. The `claude plugin
 commands add entries to your settings without overwriting what's there.
 
 Requirements: Claude Code with plugin support (built and tested on 2.1.329), `git`, and
-`python3` ≥ 3.8 on `PATH` (the scripts and hook use the standard library only).
+`python3` ≥ 3.12 on `PATH` (the scripts and hook use the standard library only).
 
 ## 1. Install for yourself (all projects)
 

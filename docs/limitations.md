@@ -84,10 +84,13 @@ Honest list. If one of these bites you, an issue is welcome.
   own permission settings. The Lead is told not to push, deploy, or discard work, and the
   skills say so, but no hook enforces it for the main session. A plugin shouldn't change
   how your other sessions behave.
-- Needs `sh` and Python 3.8+. `scripts/etk.sh` and the hook wrapper try `python3`,
-  `/usr/bin/python3`, `/usr/local/bin/python3`, then `python`, skipping any that don't run
-  (a pyenv/asdf shim without its root, a deleted venv). Without a working Python the guard
-  prints a notice and lets the call through, and the snapshot step fails visibly.
+- Needs `sh` and Python 3.12+. `scripts/etk.sh` and the hook wrapper try `python3`,
+  `python3.13`, `python3.12`, `/usr/bin/python3`, `/usr/local/bin/python3`,
+  `/opt/homebrew/bin/python3`, then `python`, skipping any that don't run or are older than
+  3.12 (a pyenv/asdf shim without its root, a deleted venv, an old system Python). Without
+  a suitable Python the guard prints "Python 3.12+ not found" and lets the call through
+  (it fails open, so on an older Python the subagents run unguarded), and the snapshot step
+  fails visibly.
 - Inline-code detection for read-only roles (`node -e`, `python -c` writing files) is a
   pattern match on common write calls, not an interpreter. It catches mistakes, not intent.
   Blocking inline code outright wouldn't close the gap (a script in the temp dir runs the

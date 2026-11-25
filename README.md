@@ -35,7 +35,7 @@ You don't call the developer, reviewer, or QA yourself during a normal build. Th
 
 ## Install
 
-Requires Claude Code with plugin support (built and tested on 2.1.329) and `python3` (3.8+).
+Requires Claude Code with plugin support (built and tested on 2.1.329) and `python3` (3.12+).
 
 ```bash
 claude plugin marketplace add hoanganhnvnb/engineering-team-kit
@@ -153,7 +153,7 @@ For long tasks the Lead keeps short notes in `docs/agent/CURRENT_STATE.md` and
 ```bash
 git clone https://github.com/hoanganhnvnb/engineering-team-kit
 cd engineering-team-kit
-./scripts/selftest.sh                       # manifests + unit/structure tests
+bash scripts/selftest.sh                    # manifests + unit/structure tests
 claude --plugin-dir . # try it in any project: cd there and run with --plugin-dir <path>
 python3 tests/e2e/run.py node-small-bug "/engineering-team:fix …" --check "npm test"   # real model run
 ```
