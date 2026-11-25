@@ -932,8 +932,8 @@ def check_find(args: list[str], root: str, role: str, depth: int, cur: str | Non
             continue
         end = next((k for k in range(j + 1, len(exprs)) if exprs[k] in {";", "+"}), len(exprs))
         for r in roots:
-            words, outputs, _ = program_ex([w.replace("{}", r) for w in exprs[j + 1:end]])
-            check_words(words, root, role, depth + 1, cur, None, outputs)
+            words, outputs, assigns = program_ex([w.replace("{}", r) for w in exprs[j + 1:end]])
+            check_words(words, root, role, depth + 1, cur, None, outputs, assigns=assigns)
 
 
 def load_protected(root: str) -> list[str]:
@@ -1047,15 +1047,19 @@ def etk_exec_command(words: list[str]) -> list[str] | None:
 
 
 def check_words(words: list[str], root: str, role: str, depth: int, cur: str | None, seg: Seg | None = None,
-                outputs: list[str] | None = None, created: set | None = None) -> None:
-    """Judge one simple command (already stripped of wrappers and shell keywords)."""
+                outputs: list[str] | None = None, created: set | None = None,
+                assigns: list[str] | None = None) -> None:
+    """Judge one simple command (already stripped of wrappers and shell keywords).
+
+    `assigns` are the NAME=VALUE words program_ex() stripped from in front of it."""
+    read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
+    create_only = role == "qa-engineer"
+    check_assigned(assigns or [], words, role)
     if not words:
         return
     redirs = seg.redirs if seg else []
     outputs = outputs or []
     created = created or set()
-    read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
-    create_only = role == "qa-engineer"
     prog = os.path.basename(words[0])
     if prog == "eval":
         check_bash(" ".join(words[1:]), root, role, depth + 1, cur)
@@ -1064,7 +1068,8 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
     if inner is not None:
         if read_only:
             raise Blocked(f"{role} is read-only; it can't run gate commands through `etk exec`")
-        check_words(*program_ex(inner)[:1], root, role, depth + 1, cur)
+        inner_words, _, inner_assigns = program_ex(inner)
+        check_words(inner_words, root, role, depth + 1, cur, assigns=inner_assigns)
     if prog == "trap":
         ops = [w for w in words[1:] if w != "--"]
         if ops[:1] not in (["-l"], ["-p"]):
@@ -1391,6 +1396,17 @@ def files_created(seg: Seg) -> list[str]:
     return out
 
 
+def check_assigned(assigns: list[str], words: list[str], role: str) -> None:
+    """Variables a command sets that run code, redirect git, or rewrite snapshots."""
+    assigned = variables_set(assigns, words)
+    check_startup_hook_vars(assigned)
+    if role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES or role == "qa-engineer":
+        if any(GIT_ENV_HOOKS.match(w) for w in assigned):
+            raise Blocked(f"{role} may not set git environment that runs programs or changes config")
+        if any(SNAPSHOT_ENV.match(w) for w in assigned):
+            raise Blocked(f"{role} may not rewrite test snapshots")
+
+
 def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None = UNSET) -> None:
     if depth > MAX_DEPTH:
         raise Blocked("command nests shells too deeply to check")
@@ -1427,12 +1443,6 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         bg_reset = pending and seg.after == "&"  # a backgrounded list runs in a subshell
         if pending and not in_pipe and seg.sep in {";", "||"}:
             cur, dirs[:], pending = None, ["?"], False
-        assigned = variables_set(assigns, words)
-        check_startup_hook_vars(assigned)
-        if (read_only or role == "qa-engineer") and any(GIT_ENV_HOOKS.match(w) for w in assigned):
-            raise Blocked(f"{role} may not set git environment that runs programs or changes config")
-        if (read_only or role == "qa-engineer") and any(SNAPSHOT_ENV.match(w) for w in assigned):
-            raise Blocked(f"{role} may not rewrite test snapshots")
         first = os.path.basename(words[0]) if words else ""
         assignish = any(re.match(r"^\w+\+?=", w) for w in seg.words) or first in {
             "export", "declare", "typeset", "local", "readonly"}
@@ -1442,6 +1452,7 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         if any(re.search(r"\bCDPATH\b", w) for w in seg.words) and not in_pipe:
             cur = None  # `cd x` may land somewhere else entirely
         if words and os.path.basename(words[0]) in {"cd", "pushd", "popd"}:
+            check_assigned(assigns, words, role)
             new = next_dir(words, cur, list(dirs) if in_pipe else dirs, taint)
             if not in_pipe:
                 if seg.after in {";", "||"}:  # the cd may have failed, leaving us where we were
@@ -1453,7 +1464,7 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             continue
         if not in_pipe and any(os.path.basename(w) in {"cd", "pushd", "popd"} for w in words[1:]):
             cur = None  # a cd we can't attribute (find -exec cd, xargs cd): stay strict
-        check_words(words, root, role, depth, cur, seg, outputs, created)
+        check_words(words, root, role, depth, cur, seg, outputs, created, assigns)
         if bg_reset:
             cur, dirs[:], pending = None, ["?"], False
         if words and os.path.basename(words[0]) == "trap" and not in_pipe:

@@ -522,6 +522,15 @@ ENV_LOOKALIKES = (
     + [("dev", c, "block") for c in ["env PS4=x npm test", "sudo env BASH_ENV=x.sh ls", "timeout 5 env PS0=x ls"]]
 )
 
+# Variables set for a command that find -exec runs.
+NESTED_ENV = (
+    each(ROLES, "find . -exec env BASH_ENV=x sh -c true \\;", "block")
+    + [(r, "find . -exec env GIT_DIR=/tmp/x git log \\;", "block") for r in ("rev", "qa")]
+    + [(r, "find . -exec env UPDATE_SNAPSHOTS=1 npm test \\;", "block") for r in ("rev", "qa")]
+    + [("dev", "scripts/etk.sh exec G3 --type test -- env BASH_ENV=x npm test", "block")]
+    + each(ROLES, "find . -exec env LANG=C ls {} \\;", "allow")
+)
+
 # Wrapper write targets inside nested commands.
 NESTED_TIME_OUTPUT = (
     [("dev", "find . -name x -exec time -o .env npm test \\;", "block"),
@@ -1163,7 +1172,7 @@ READ_ONLY_READS = (
 )
 
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES + ETK_EXEC_FORMS + GIT_OTHER_OPTIONS + READ_ONLY_READS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES + ETK_EXEC_FORMS + GIT_OTHER_OPTIONS + READ_ONLY_READS + NESTED_ENV)
 
 
 def make_project(base: Path) -> Path:
