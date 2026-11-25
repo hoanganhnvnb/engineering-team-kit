@@ -1027,6 +1027,41 @@ class GuardCorpus(unittest.TestCase):
                 "agent_type": ROLES["dev"]}
         self.assertIsNone(guard.decide(data))
 
+    def test_unexpected_errors_block_etk_agents(self):
+        agent = ROLES["dev"]
+        cases = [
+            {"tool_name": "Bash", "tool_input": ["git", "status"], "cwd": str(self.project), "agent_type": agent},
+            {"tool_name": "Bash", "tool_input": {"command": "cd src && ls"}, "cwd": 12, "agent_type": agent},
+            {"tool_name": "Write", "tool_input": {"file_path": "a\0b"}, "cwd": str(self.project), "agent_type": agent},
+            {"tool_name": "Bash", "tool_input": {"command": "cat a\0b > /tmp/x\0y"}, "cwd": str(self.project),
+             "agent_type": agent},
+        ]
+        for data in cases:
+            with self.subTest(data=data):
+                self.assertIn("guard error", guard.decide(data) or "")
+        self.assertIsNone(guard.decide(["not", "a", "dict"]))
+
+    def test_unlistable_untracked_files_block_bulk_add(self):
+        data = {"tool_name": "Bash", "tool_input": {"command": "git add -A"}, "cwd": str(self.project),
+                "agent_type": ROLES["dev"]}
+        self.assertIsNone(guard.decide(data))
+        for exc in (subprocess.TimeoutExpired("git", 5), OSError("no git")):
+            with mock.patch.object(guard.subprocess, "run", side_effect=exc):
+                self.assertIn("untracked", guard.decide(data) or "", exc)
+
+    def test_wrapper_blocks_when_guard_crashes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "python3"
+            fake.write_text('#!/bin/sh\nif [ "$1" = "-c" ]; then exit 0; fi\nexit 1\n')
+            fake.chmod(0o755)
+            env = dict(os.environ, PATH=f"{tmp}:{os.environ['PATH']}")
+            payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": "/",
+                                  "agent_type": ROLES["dev"]})
+            r = subprocess.run(["sh", str(ROOT / "hooks" / "run-guard.sh")], input=payload, env=env,
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 2, r.stderr)
+            self.assertIn("guard error", r.stderr)
+
     def test_hook_matcher_covers_mcp_tools(self):
         hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
         matcher = hooks["hooks"]["PreToolUse"][0]["matcher"]

@@ -482,7 +482,8 @@ def untracked_secrets(cwd: str) -> list[str]:
         out = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=cwd,
                              capture_output=True, text=True, timeout=5).stdout
     except (OSError, subprocess.TimeoutExpired):
-        return []
+        raise Blocked("couldn't list untracked files to look for secrets (git failed or timed out); "
+                      "add paths explicitly")
     return [f for f in out.splitlines() if is_secret(f)]
 
 
@@ -1320,6 +1321,8 @@ def check_mcp(tool: str) -> None:
 
 def decide(data: dict) -> str | None:
     """Reason to block this tool call, or None to allow it."""
+    if not isinstance(data, dict):
+        return None  # nothing says this is one of our agents
     agent = str(data.get("agent_type") or "")
     if not agent.startswith(PREFIX):
         return None
@@ -1347,6 +1350,8 @@ def decide(data: dict) -> str | None:
                 raise Blocked("qa-engineer may only create new test files, not change existing ones")
     except Blocked as b:
         return str(b)
+    except Exception as e:  # a guard that can't decide must not wave the call through
+        return f"guard error ({type(e).__name__}: {e}); treating the call as unsafe"
     return None
 
 
