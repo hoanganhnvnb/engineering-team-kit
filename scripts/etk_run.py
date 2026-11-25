@@ -11,7 +11,7 @@
     etk_run.py ready [RUN]                    # exit 0 only if a release step may run now (else lists why)
     etk_run.py authorize --action A --source S --quote "Q" [--target T] [--condition C] [--data DIR] [RUN]
     etk_run.py act --action A [--target T] [--ref R] [--url U] [--command C] --exit N [--production]
-                   [--data DIR] [--force-record] [RUN]
+                   [--data DIR] [--force-record] [RUN]      # --data is required for deploy/rollback
     etk_run.py decide --id ID [--level L0..L4 --question Q] [--options "a|b"] [--recommended R]
                       [--status S] [--answer-quote Q] [RUN]     # level and question: new ids only
 
@@ -572,15 +572,15 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
                 errors.append(f"{label}: needs the user's own words (authorization source prompt or answer), "
                               "a workflow profile is not enough")
                 continue
-        if act == "deploy" and ac["production"]:
+        if act in {"deploy", "rollback"} and ac["production"]:
             named = [au for au in match if target and _text(au.get("target")).lower() == target.lower()]
             if not named:
-                errors.append(f"{label}: production deploy needs an authorization for exactly this target "
-                              f"(`authorize --action deploy --target {target or '<name>'}`), not a blanket one")
+                errors.append(f"{label}: production {act} needs an authorization for exactly this target "
+                              f"(`authorize --action {act} --target {target or '<name>'}`), not a blanket one")
                 continue
             if not any(affirms(_text(au.get("quote")), PROD_WORDS) or affirms(_text(au.get("quote")), word(target))
                        for au in named):
-                errors.append(f"{label}: production deploy, but no authorization quote names the target "
+                errors.append(f"{label}: production {act}, but no authorization quote names the target "
                               "or says production/prod/live")
     # A failed step that a later run of the same action on the same target got through is settled.
     failed = [msg for n, act, target, msg in failed
@@ -867,6 +867,9 @@ def cmd_ready(a) -> int:
 
 def cmd_act(a) -> int:
     production = a.production
+    if a.action in {"deploy", "rollback"} and not a.data:
+        refuse(f"act --action {a.action} needs --data DIR (the plugin data dir) so the profile can say "
+               "whether the target is production")
     if a.data and a.action in {"deploy", "rollback"} and a.target.strip():
         # The profile knows which targets are production; it can only add the flag, never drop it.
         production = profile_production(a.data, a.target.strip()) or production
@@ -1148,7 +1151,8 @@ def main() -> int:
     ac.add_argument("--exit", required=True, type=int)
     ac.add_argument("--production", action="store_true")
     ac.add_argument("--data", default=None, metavar="DIR",
-                    help="plugin data dir: a deploy target the profile marks production is recorded as production")
+                    help="plugin data dir, required for deploy/rollback: a target the profile marks production "
+                         "is recorded as production")
     ac.add_argument("--force-record", action="store_true",
                     help="record a step that already happened although `ready` fails (gates_ok false)")
     de = sub.add_parser("decide", help="record or update a decision by id")

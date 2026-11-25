@@ -346,7 +346,7 @@ class ReleaseLedgerTests(unittest.TestCase):
             self.etk("authorize", "--action", "push", "--source", "prompt", "--quote", "push it", str(run))
             before = (run / "gates.json").read_text()
             for action in ("push", "pr", "merge", "tag", "deploy"):
-                r = self.etk("act", "--action", action, "--exit", "0", str(run))
+                r = self.etk("act", "--action", action, "--exit", "0", "--data", str(self.data), str(run))
                 self.assertEqual(r.returncode, 2, (kind, action))
                 self.assertIn("can't release", r.stderr)
             self.assertEqual((run / "gates.json").read_text(), before)
@@ -359,7 +359,7 @@ class ReleaseLedgerTests(unittest.TestCase):
 
     def test_rollback_is_exempt_from_gates_but_needs_user_words(self):
         run, _ = self.init("--kind", "ship")
-        self.etk("act", "--action", "rollback", "--target", "prod", "--exit", "0", str(run))
+        self.etk("act", "--action", "rollback", "--target", "prod", "--exit", "0", "--data", str(self.data), str(run))
         led = self.ledger(run)
         led["authorizations"] = [{"action": "rollback", "source": "profile", "quote": "", "target": ""}]
         self.write(run, led)
@@ -388,7 +388,8 @@ class ReleaseLedgerTests(unittest.TestCase):
         run = self.ship_run()
         self.etk("authorize", "--action", "deploy", "--source", "prompt", "--quote", "go ahead and deploy",
                  "--target", "web-eu", str(run))
-        self.etk("act", "--action", "deploy", "--target", "web-eu", "--exit", "0", "--production", str(run))
+        self.etk("act", "--action", "deploy", "--target", "web-eu", "--exit", "0", "--production",
+                 "--data", str(self.data), str(run))
         self.assertIn("production deploy", self.check(run).stdout)
         for quote in ("deploy it to PROD please", "ship to web-eu", "push it live", "không test nữa, deploy prod",
                       "review không lỗi thì deploy prod luôn", "no errors -> deploy prod",
@@ -408,7 +409,8 @@ class ReleaseLedgerTests(unittest.TestCase):
     def test_production_deploy_needs_a_target_specific_authorization(self):
         run = self.ship_run()
         self.etk("authorize", "--action", "deploy", "--source", "prompt", "--quote", "deploy it to production", str(run))
-        self.etk("act", "--action", "deploy", "--target", "web", "--exit", "0", "--production", str(run))
+        self.etk("act", "--action", "deploy", "--target", "web", "--exit", "0", "--production",
+                 "--data", str(self.data), str(run))
         self.assertIn("exactly this target", self.check(run).stdout)
         led = self.ledger(run)
         led["authorizations"][0]["target"] = "web-staging"
@@ -432,6 +434,32 @@ class ReleaseLedgerTests(unittest.TestCase):
             r = self.etk("act", "--action", "deploy", "--target", target, "--exit", "0", *flag, *data, str(run))
             self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual([a["production"] for a in self.ledger(run)["actions"]], [True, False, True])
+        self.assertEqual(self.check(run).returncode, 0, self.check(run).stdout)
+
+    def test_deploy_and_rollback_need_data(self):
+        run = self.ship_run()
+        before = (run / "gates.json").read_text()
+        for action in ("deploy", "rollback"):
+            r = self.etk("act", "--action", action, "--target", "web-eu", "--exit", "0", str(run))
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("needs --data", r.stderr)
+        self.assertEqual((run / "gates.json").read_text(), before)
+
+    def test_production_rollback_needs_the_target_and_the_word(self):
+        run = self.ship_run()
+        self.profile("set", "deploy.targets", json.dumps([{"name": "web-eu", "kind": "manual", "production": True}]))
+        self.etk("authorize", "--action", "rollback", "--source", "answer", "--quote", "yes roll it back", str(run))
+        r = self.etk("act", "--action", "rollback", "--target", "web-eu", "--exit", "0", "--data", str(self.data),
+                     str(run))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(self.ledger(run)["actions"][0]["production"])
+        self.assertIn("production rollback needs an authorization for exactly this target", self.check(run).stdout)
+        led = self.ledger(run)
+        led["authorizations"][0]["target"] = "web-eu"
+        self.write(run, led)
+        self.assertIn("production rollback, but no authorization quote", self.check(run).stdout)
+        led["authorizations"][0]["quote"] = "yes roll back prod"
+        self.write(run, led)
         self.assertEqual(self.check(run).returncode, 0, self.check(run).stdout)
 
     def test_failed_action_blocks_complete(self):

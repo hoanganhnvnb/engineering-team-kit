@@ -93,7 +93,9 @@ etk run authorize --action deploy --target staging --source prompt \
   --data DATA --exit <code> RUN`. With `--data`, a target the profile
   marks `production` is recorded as production even without the flag.
 - On failure: stop, report, and show the rollback command. Run the rollback only if
-  rollback was authorized too.
+  rollback was authorized too, and record it with `etk run act --action rollback
+  --target <name> --data DATA --exit <code> RUN`. A production rollback needs the same
+  permission as a production deploy: for that target, naming it or production.
 
 ## 5. Close
 
