@@ -693,7 +693,9 @@ SHELL_OPT_WITH_ARG = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
 def shell_input(prog: str, args: list[str], cur: str | None) -> tuple[str, str | None]:
     """Where a shell gets its commands: ("script", text) for -c, ("stdin", None), or ("file", None)."""
     if prog in {"source", "."}:
-        return ("stdin", None) if args[:1] and reads_stdin(args[0], cur) else ("file", None)
+        if args[:1] and reads_stdin(args[0], cur):
+            return "stdin", None
+        return "file", args[0] if args else None
     i, c_flag, s_flag = 0, False, False
     while i < len(args):
         w = args[i]
@@ -721,7 +723,7 @@ def shell_input(prog: str, args: list[str], cur: str | None) -> tuple[str, str |
         return "script", operands[0]
     if s_flag or not operands or reads_stdin(operands[0], cur):
         return "stdin", None
-    return "file", None
+    return "file", operands[0]
 
 
 def check_find(args: list[str], root: str, role: str, depth: int, cur: str | None) -> None:
@@ -777,12 +779,13 @@ def callback_scripts(prog: str, args: list[str]) -> list[str]:
 
 
 def check_words(words: list[str], root: str, role: str, depth: int, cur: str | None, seg: Seg | None = None,
-                outputs: list[str] | None = None) -> None:
+                outputs: list[str] | None = None, created: set | None = None) -> None:
     """Judge one simple command (already stripped of wrappers and shell keywords)."""
     if not words:
         return
     redirs = seg.redirs if seg else []
     outputs = outputs or []
+    created = created or set()
     read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
     create_only = role == "qa-engineer"
     prog = os.path.basename(words[0])
@@ -800,6 +803,9 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
         check_bash(script, root, role, depth + 1, cur)
     if prog in SHELLS or prog in {"source", "."}:
         mode, script = shell_input(prog, words[1:], cur)
+        if mode == "file" and script is not None and os.path.normpath(script) in created:
+            raise Blocked(f"`{script}` is created earlier in this command; it could be a link to stdin, so the "
+                          f"guard can't tell what it runs")
         if mode == "script":
             check_bash(script, root, role, depth + 1, cur)
         elif mode == "stdin":
@@ -840,6 +846,15 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
             raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
 
 
+def files_created(seg: Seg) -> list[str]:
+    """Paths this command may create or replace: link/copy/move destinations, tee, redirect targets."""
+    words = program(seg.words)
+    out = redirect_targets(seg.redirs)
+    if words and os.path.basename(words[0]) in {"ln", "mv", "cp", "install", "tee", "touch", "dd"}:
+        out += [w for w in words[1:] if not w.startswith("-")] + [w[3:] for w in words[1:] if w.startswith("of=")]
+    return out
+
+
 def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None = UNSET) -> None:
     if depth > MAX_DEPTH:
         raise Blocked("command nests shells too deeply to check")
@@ -851,6 +866,7 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
     read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
     if read_only and WRITE_CODE.search(cmd) and any(runs_inline_code(program(e.words)) for e in events if isinstance(e, Seg)):
         raise Blocked(f"{role} is read-only; inline code that writes files isn't allowed")
+    created = {os.path.normpath(t) for e in events if isinstance(e, Seg) for t in files_created(e)}
     dirs: list = []
     groups: list = []
     pending = False  # a cd whose success we assumed; a later `;`/`||` may run where it failed
@@ -896,7 +912,7 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             continue
         if not in_pipe and any(os.path.basename(w) in {"cd", "pushd", "popd"} for w in words[1:]):
             cur = None  # a cd we can't attribute (find -exec cd, xargs cd): stay strict
-        check_words(words, root, role, depth, cur, seg, outputs)
+        check_words(words, root, role, depth, cur, seg, outputs, created)
         if bg_reset:
             cur, dirs[:], pending = None, ["?"], False
         if words and os.path.basename(words[0]) == "trap" and not in_pipe:

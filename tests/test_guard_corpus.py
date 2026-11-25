@@ -514,8 +514,26 @@ BACKGROUND_CD = (
     + [("dev", c, "allow") for c in ["npm test & npm run lint", "cd src && ls && rm -rf build", "cd /tmp && ls & rm -rf /tmp/x"]]
 )
 
+# A shell operand that the same command creates could be a link to stdin.
+CREATED_OPERAND = (
+    [("dev", c, "block") for c in [
+        "ln -s /dev/stdin x && bash x",
+        "cp /dev/stdin run.sh && bash run.sh",
+        "echo 'git push' > run.sh && bash run.sh",
+        "mv a b; sh b",
+        "tee x.sh < /dev/null; bash ./x.sh",
+        "ln -s /dev/stdin x && source x",
+    ]]
+    + [("dev", c, "allow") for c in [
+        "bash scripts/run.sh",
+        "cp a b && bash scripts/run.sh",
+        "npm test > /tmp/o.txt && bash scripts/run.sh",
+        "ln -s a b && bash scripts/run.sh",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND)
 
 
 def make_project(base: Path) -> Path:
