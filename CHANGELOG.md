@@ -19,6 +19,8 @@ All notable changes to this plugin. Versions follow semver; the version in
   - Detects git/SVN, host and CLI, default branch, commit style and language, commit
     tooling, and deploy candidates. Asks only for what it can't detect.
   - Settings in the repo can't grant push, merge or deploy.
+  - The old `commit: true` key in `.claude/engineering-team.json` is ignored. The
+    profile's commit setting (`release.commit`) replaces it.
 - **Run ledger.**
   - New run kind `ship` and gate G7 (release).
   - New `run phase`, `run authorize`, `run act` and `run decide`.

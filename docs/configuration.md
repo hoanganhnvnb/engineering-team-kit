@@ -14,7 +14,7 @@ always sees it.
 | `ui.url` | string | Where to open it. |
 | `verify` | string[] | Commands that drive the real feature (smoke request, driver script). QA and the Lead run them and record them as `runtime` evidence. |
 | `max_cycles` | int | Review/fix cycles before escalating (default 3). |
-| `commit` | bool | Older setting: `true` lets the Lead commit locally at the end. Your [workflow profile](workflow.md) takes over once it exists. Push, merge and deploy are never read from this file. Default `false`. |
+| `commit` | bool | Deprecated, ignored. Whether the Lead commits is your [workflow profile](workflow.md)'s `release.commit` setting. |
 | `invariants` | string[] | Business rules that must hold. Reviewers and QA check them (G4). |
 | `protected_paths` | string[] | Paths no agent changes without asking you first. The guard reads this file from the session's working directory and blocks ETK subagents (every role) from writing under these paths with Write/Edit or through the shell (redirects, `rm`, `mv`, `cp`, `sed -i`, `git rm`, and similar). Entries are paths, directories (`db/migrations/`) or globs (`infra/**`, `src/legacy/*.js`). It stops accidents, not a determined bypass: see [limitations](limitations.md#guard-hook). |
 | `rules` | object[] | Path-scoped invariants: `{"paths": "src/domain/**", "rule": "…", "check": "<cmd>"}`. Reviewers apply each rule to changed files matching `paths` and run `check` if present. Prefer rules with a `check`: prose-only rules are the weakest kind. |
