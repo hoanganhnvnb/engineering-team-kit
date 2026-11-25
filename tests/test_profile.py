@@ -522,10 +522,12 @@ class GuardProfileTests(unittest.TestCase):
         for tool in ("Write", "Edit"):
             self.assertEqual(self.call(tool, {"file_path": gates}).returncode, 2, tool)
         for cmd in (f"echo {{}} > {gates}", "sed -i s/a/b/ .etk/runs/r/gates.json", "rm -rf .etk",
-                    "cd .etk/runs && touch x"):
+                    "cd .etk/runs && touch x", "echo x > .ETK/runs/r/gates.json", "rm -rf .e*",
+                    "echo x > .et?/runs/r/gates.json"):
             with self.subTest(cmd=cmd):
                 self.assertTrue(self.blocked(cmd))
         self.assertFalse(self.blocked("cat .etk/runs/r/gates.json"))
+        self.assertFalse(self.blocked("rm -rf build/*"))
         self.assertEqual(self.call("Read", {"file_path": gates}).returncode, 0)
 
     def test_profile_and_ledger_mutations(self):

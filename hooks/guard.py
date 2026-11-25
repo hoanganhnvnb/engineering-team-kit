@@ -34,6 +34,7 @@ This is a seatbelt, not a sandbox: it stops the accidents agents actually make.
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -1010,10 +1011,14 @@ def in_plugin_data(path: str, cur: str | None) -> bool:
 def in_run_records(path: str, cur: str | None) -> bool:
     """A path inside `.etk/` (run ledgers: gates, permissions, release actions). Only the Lead writes them."""
     p = path.strip().strip("'\"")
-    if re.search(r"(^|/)\.etk(/|$)", p):
+    # Case-insensitive filesystems (macOS, Windows) treat `.ETK` as `.etk`; a glob such as
+    # `.e*` can expand to it too.
+    if re.search(r"(^|/)\.etk(/|$)", p, re.I) or any(
+            part.startswith(".") and re.search(r"[*?\[]", part) and fnmatch.fnmatch(".etk", part.lower())
+            for part in p.split("/")):  # a bare `*` doesn't match dotfiles in the shell
         return True
     full = absjoin(p, cur)
-    return full is not None and re.search(r"/\.etk(/|$)", os.path.realpath(full)) is not None
+    return full is not None and re.search(r"/\.etk(/|$)", os.path.realpath(full), re.I) is not None
 
 
 def check_protected(path: str, root: str, cur: str | None) -> None:
