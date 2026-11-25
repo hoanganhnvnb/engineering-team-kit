@@ -517,6 +517,17 @@ class GuardProfileTests(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertFalse(self.blocked(cmd))
 
+    def test_run_records_are_lead_only(self):
+        gates = "/work/proj/.etk/runs/20260101-000000-x/gates.json"
+        for tool in ("Write", "Edit"):
+            self.assertEqual(self.call(tool, {"file_path": gates}).returncode, 2, tool)
+        for cmd in (f"echo {{}} > {gates}", "sed -i s/a/b/ .etk/runs/r/gates.json", "rm -rf .etk",
+                    "cd .etk/runs && touch x"):
+            with self.subTest(cmd=cmd):
+                self.assertTrue(self.blocked(cmd))
+        self.assertFalse(self.blocked("cat .etk/runs/r/gates.json"))
+        self.assertEqual(self.call("Read", {"file_path": gates}).returncode, 0)
+
     def test_profile_and_ledger_mutations(self):
         etk = "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh"
         for cmd in (f'sh "{etk}" profile set release.push \'"auto"\' --data /x/plugins/data/e',

@@ -1007,7 +1007,18 @@ def in_plugin_data(path: str, cur: str | None) -> bool:
     return inside(absjoin(p, cur), data)
 
 
+def in_run_records(path: str, cur: str | None) -> bool:
+    """A path inside `.etk/` (run ledgers: gates, permissions, release actions). Only the Lead writes them."""
+    p = path.strip().strip("'\"")
+    if re.search(r"(^|/)\.etk(/|$)", p):
+        return True
+    full = absjoin(p, cur)
+    return full is not None and re.search(r"/\.etk(/|$)", os.path.realpath(full)) is not None
+
+
 def check_protected(path: str, root: str, cur: str | None) -> None:
+    if in_run_records(path, cur):
+        raise Blocked(f"`{path}` is an ETK run record; only the Lead writes the ledger")
     if in_plugin_data(path, cur):
         raise Blocked(f"`{path}` is in the plugin data dir (the developer's workflow profile); only the Lead "
                       f"records workflow profile / release decisions")

@@ -70,6 +70,12 @@ Honest list. If one of these bites you, an issue is welcome.
   passes. Anything else is blocked for our agents. If Claude Code adds a harmless tool and
   an agent needs it, add it to `SAFE_TOOLS` in `hooks/guard.py`. The main session only pays
   for a `sh` start per tool call; the wrapper exits before Python runs.
+- **Profile and release records are protected by name, not by a secret.** Subagents can't
+  write into the plugin data dir or `.etk/`, and can't run `profile set…` or
+  `run authorize|act|decide|phase`. A copy of the scripts, or inline code that builds the
+  path at runtime, gets past that, like any other guard gap. `run check` still requires
+  every release action to match a permission that quotes your words, and the Lead,
+  not a subagent, runs every outward step.
 - **`etk.sh exec` is only as guarded as the guard's wrapper handling.** `exec <gate> --type t
   -- <cmd>` runs `<cmd>` itself, so for a guarded role the command text is only checked to
   the extent the guard looks through that wrapper. It refuses an empty command, and no skill
