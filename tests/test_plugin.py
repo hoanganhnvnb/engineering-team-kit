@@ -32,7 +32,7 @@ def frontmatter(path: Path) -> dict[str, str]:
 
 class PluginStructure(unittest.TestCase):
     def test_required_commands_exist(self):
-        self.assertEqual(SKILLS, {"build", "fix", "review", "test", "improve-ui", "retro"})
+        self.assertEqual(SKILLS, {"build", "fix", "review", "test", "improve-ui", "retro", "team"})
 
     def test_required_agents_exist(self):
         self.assertEqual(AGENTS, {"developer", "code-reviewer", "qa-engineer", "ux-reviewer", "scout", "tech-writer"})
@@ -77,7 +77,11 @@ class PluginStructure(unittest.TestCase):
                 self.assertIn(t, tools, f"{name} must not be able to {t}")
 
     def test_skills_are_user_commands(self):
-        for name in SKILLS:
+        """Step commands start only when the user types them; `team` is the one entry the model may pick."""
+        team = frontmatter(ROOT / "skills" / "team" / "SKILL.md")
+        self.assertNotIn("disable-model-invocation", team)
+        self.assertIn("Not for questions", team.get("description", ""))
+        for name in SKILLS - {"team"}:
             fm = frontmatter(ROOT / "skills" / name / "SKILL.md")
             with self.subTest(skill=name):
                 self.assertEqual(fm.get("name"), name)
@@ -113,7 +117,7 @@ class PluginStructure(unittest.TestCase):
         words = {4: "four", 5: "five", 6: "six", 7: "seven"}
         progress = (ROOT / "docs" / "PROGRESS.md").read_text()
         self.assertIn(f"{len(AGENTS)} subagents", progress)
-        self.assertIn(f"all {words[len(SKILLS)]} skills", progress)
+        self.assertIn(f"all {words[len(SKILLS) - 1]} step skills", progress)
         self.assertNotIn("couldn't execute", progress)
         self.assertIn(f"the {words[len(SKILLS)]} commands", (ROOT / "docs" / "install.md").read_text())
 

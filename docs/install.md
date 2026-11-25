@@ -20,7 +20,7 @@ Restart Claude Code (or start a new session). Check it's there:
 claude plugin list            # engineering-team@engineering-team-kit, enabled
 ```
 
-In a session, type `/engineering-team:` and the six commands should autocomplete.
+In a session, type `/engineering-team:` and the seven commands should autocomplete.
 
 ## 2. Pin a version
 
