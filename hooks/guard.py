@@ -991,7 +991,26 @@ def is_protected(path: str, root: str, cur: str | None) -> bool:
     return False
 
 
+def in_plugin_data(path: str, cur: str | None) -> bool:
+    """A path inside the plugin's data dir (the developer's workflow profile lives there).
+
+    The hook gets CLAUDE_PLUGIN_DATA in its environment; the agent's shell doesn't, so a path that
+    spells the variable or the data dir's usual location is treated as inside it too."""
+    p = path.strip().strip("'\"")
+    if "CLAUDE_PLUGIN_DATA" in p or re.search(r"(^|/)\.claude/plugins/data(/|$)", p):
+        return True
+    data = os.environ.get("CLAUDE_PLUGIN_DATA", "").strip()
+    if not data or not os.path.isabs(data):
+        return False
+    if p == "~" or p.startswith("~/"):
+        p = os.path.expanduser(p)
+    return inside(absjoin(p, cur), data)
+
+
 def check_protected(path: str, root: str, cur: str | None) -> None:
+    if in_plugin_data(path, cur):
+        raise Blocked(f"`{path}` is in the plugin data dir (the developer's workflow profile); only the Lead "
+                      f"records workflow profile / release decisions")
     if is_protected(path, root, cur):
         raise Blocked(f"`{path}` is listed in protected_paths (.claude/engineering-team.json); ask the user first")
 
@@ -1025,6 +1044,29 @@ def callback_scripts(prog: str, args: list[str]) -> list[str]:
 
 
 ETK_ENTRYPOINTS = {"etk.sh", "etk_run.py"}
+PROFILE_WRITES = {"set", "unset", "confirm", "remember"}
+LEDGER_WRITES = {"phase", "authorize", "act", "decide"}
+
+
+def check_etk_state(words: list[str]) -> None:
+    """Only the Lead changes the workflow profile or records release decisions in the ledger."""
+    for k, w in enumerate(words):
+        base = os.path.basename(w)
+        if k and words[k - 1] == "-m":  # python -m etk_profile
+            base += ".py"
+        rest = words[k + 1:]
+        if base == "etk.sh" and rest[:1] in (["profile"], ["run"]):
+            base, rest = ("etk_profile.py" if rest[0] == "profile" else "etk_run.py"), rest[1:]
+        if base == "etk_profile.py":
+            hit = any(x in PROFILE_WRITES for x in rest)  # `--data DIR` can sit anywhere: any write verb counts
+        elif base == "etk_run.py":
+            sub = next((x for x in rest if not x.startswith("-")), "")
+            hit = sub in LEDGER_WRITES
+        else:
+            continue
+        if hit:
+            raise Blocked("only the Lead records workflow profile / release decisions; report what you found "
+                          "to the Lead instead")
 
 
 def etk_exec_command(words: list[str]) -> list[str] | None:
@@ -1064,6 +1106,7 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
     if prog == "eval":
         check_bash(" ".join(words[1:]), root, role, depth + 1, cur)
         return
+    check_etk_state(words)
     inner = etk_exec_command(words)
     if inner is not None:
         if read_only:
