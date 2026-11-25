@@ -155,6 +155,26 @@ What they showed:
   checkout binding treated that profile as unconfirmed, so the Lead stopped before committing
   and asked. The runner now confirms the profile the way onboarding does.
 
+## 0.5.1 re-run
+
+Same `--ship` setup, 2026-11-25, Claude Code 2.1.329, session model Sonnet 5.5; plus the `readme` skill on a
+fixture with a deliberately stale README (`stale-readme` overlay).
+
+| # | Request | `team` used | Pushed | Deployed | Ledger check | `npm test` | Time / cost |
+|---|---|---|---|---|---|---|---|
+| S1 | fix, then commit, push, deploy staging | yes | yes | yes | OK | exit 0 | 206 s / $1.04 |
+| S2 | fix, commit and push when it passes | yes | yes | no (not asked) | **no ledger** | exit 0 | 80 s / $0.50 |
+| S3 | fix, don't push | no | no | no | none | exit 0 | 68 s / $0.40 |
+| R | `/engineering-team:readme` | n/a | n/a | n/a | n/a | exit 0 | 69 s / $0.38 |
+
+- **S2 skipped the ledger.** It pushed correctly and reported "I did not open the run ledger", so
+  `run check` has nothing to verify. The 0.4.0 run of the same request kept one. This is model
+  variance on a one-line fix, and it is why a run without a ledger is not a verified run.
+- **R** fixed the invented functions, scripts and tooling in the README, kept the credits line,
+  asked a fresh reviewer, changed only `README.md` and committed nothing. It did not have the
+  reviewer re-check its fixes after applying the four comments.
+- One run each, so these show behavior, not rates.
+
 ## Caveats
 
 - B–G ran with `--permission-mode bypassPermissions` (the runner's default at the time)

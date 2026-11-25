@@ -90,6 +90,19 @@ Honest list. If one of these bites you, an issue is welcome.
   Wildcards are expanded (at most 256 matches, two wildcard parts, no `**`); a deeper pattern
   is blocked only when its fixed part leads into those folders, so a symlink hidden inside a deep
   wildcard part gets through.
+  For a hard limit, add the settings below to your own `~/.claude/settings.json` (a plugin can't
+  ship them): the sandbox is enforced by the OS for Bash and its children, subagents included, and
+  the deny rule covers the file tools as well. Check the key names against your Claude Code version.
+
+  ```json
+  {
+    "sandbox": { "enabled": true,
+      "filesystem": { "denyWrite": ["~/.claude", "~/.claude.json", "~/.pyenv", "~/.local/bin"] } },
+    "permissions": { "deny": ["Edit(~/.claude/**)"] }
+  }
+  ```
+- **A slow check blocks.** Claude Code lets a tool call through when a hook times out, so the
+  guard stops itself after 8 seconds (the hook's limit is 10) and blocks with a message.
 - **`etk exec` keeps the command's hands off the ledger, not off the file.** The command
   `exec` runs is repository code (a test suite). `exec` snapshots the ledger first and
   afterwards restores everything but appended gate command records, so a test can't add
