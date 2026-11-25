@@ -942,8 +942,26 @@ QUOTING = (
        ("rev", "tee /tmp/a < x", "allow"), ("rev", "echo '$(rm src/a.js)'", "allow")]
 )
 
+# Wrapper options that change directory aren't tracked: use cd.
+WRAPPER_CHDIR = (
+    [("dev", c, "block") for c in [
+        "env -C /tmp ls",
+        "env -C/tmp ls",
+        "env --chdir=/tmp ls",
+        "env --chdir /tmp ls",
+        "sudo -D /tmp ls",
+        "sudo -D/tmp ls",
+        "sudo --chdir=/tmp ls",
+        "sudo -R /x ls",
+        "sudo --chroot /x ls",
+        "env -C .. rm -rf other",
+    ]]
+    + [("dev", c, "allow") for c in ["env FOO=1 ls", "sudo -u root ls", "env -i FOO=1 ls"]]
+    + [("rev", "env -C /tmp tee z", "block")]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR)
 
 
 def make_project(base: Path) -> Path:

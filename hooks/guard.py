@@ -421,6 +421,10 @@ def program_ex(words: list[str]) -> tuple[list[str], list[str]]:
                     outputs.append(opt.split("=", 1)[1])
                 elif base == "time" and opt.startswith("-o") and len(opt) > 2:
                     outputs.append(opt[2:])
+                if (base == "env" and (opt in {"-C", "--chdir"} or opt.startswith(("--chdir=", "-C")))) \
+                        or (base == "sudo" and (opt in {"-D", "-R", "--chdir", "--chroot"}
+                                                or opt.startswith(("--chdir=", "--chroot=", "-D", "-R")))):
+                    raise Blocked(f"`{base} {opt}` changes directory where the guard can't follow; use `cd` instead")
                 if not known_wrapper_option(base, opt):
                     raise Blocked(f"`{base} {opt}` is an option the guard doesn't know; can't tell what it runs")
                 if opt in takes_arg and i < len(words):
