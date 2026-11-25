@@ -473,8 +473,30 @@ TRAP_STRICT = (
     + [("dev", c, "allow") for c in ["trap 'rm -rf /tmp/etk-scratch' INT", "trap - INT", "trap 'echo bye' INT"]]
 )
 
+# Variables the shell evaluates as code.
+STARTUP_VARS = (
+    [("dev", c, "block") for c in [
+        "BASH_ENV=x.sh npm test",
+        "ENV=x.sh sh script.sh",
+        "PS4='x' bash -x s.sh",
+        "PS0=x true",
+        "export PS0=x",
+        "declare -x PS4=x",
+        "declare PROMPT_COMMAND=x",
+        "PROMPT_COMMAND='git push'",
+        "PROMPT_COMMAND[0]='git push'",
+        "PROMPT_COMMAND+=';git push'",
+        "env BASH_ENV=x.sh npm test",
+        "read PS4",
+        "read -r BASH_ENV",
+        "printf -v PS4 %s x",
+        "export 'PS4[1]=x'",
+    ]]
+    + [("dev", c, "allow") for c in ["NODE_ENV=test npm test", "echo ENV", "git grep -n ENV src", "export FOO=1"]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS)
 
 
 def make_project(base: Path) -> Path:

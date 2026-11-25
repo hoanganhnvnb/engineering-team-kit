@@ -635,6 +635,21 @@ def runs_inline_code(words: list[str]) -> bool:
     return not args or any(INLINE_FLAG.match(a) for a in args)
 
 
+HOOK_VAR = re.compile(r"^(BASH_ENV|ENV|PS0|PS4|PROMPT_COMMAND)(\[[^\]]*\])?(\+?=.*)?$", re.S)
+HOOK_ASSIGN = re.compile(r"^(BASH_ENV|ENV|PS0|PS4|PROMPT_COMMAND)(\[[^\]]*\])?\+?=", re.S)
+DECLARERS = {"export", "declare", "typeset", "readonly", "local", "read", "printf"}
+
+
+def check_startup_hook_vars(raw: list[str], words: list[str]) -> None:
+    """Variables the shell evaluates as code (BASH_ENV, ENV, PS0, PS4, PROMPT_COMMAND)."""
+    first = os.path.basename(words[0]) if words else ""
+    named = [w for w in raw if HOOK_ASSIGN.match(w)]
+    if first in DECLARERS:
+        named += [w for w in words[1:] if not w.startswith("-") and HOOK_VAR.match(w)]
+    if named:
+        raise Blocked(f"`{named[0].split('=')[0]}` makes the shell run code later; can't be checked")
+
+
 def next_dir(words: list[str], cur: str | None, dirs: list, cdpath_unknown: bool = False) -> str | None:
     """Working directory after `cd`/`pushd`/`popd`; None once it can't be known.
 
@@ -858,12 +873,7 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         in_pipe = seg.sep in {"|", "|&"} or seg.after in {"|", "|&", "&"}
         if pending and not in_pipe and seg.sep in {";", "||"}:
             cur, dirs[:], pending = None, ["?"], False
-        for w in seg.words:
-            m = re.match(r"^(PROMPT_COMMAND|BASH_ENV)\+?=(.*)$", w, re.S)
-            if m and m.group(1) == "BASH_ENV":
-                raise Blocked("BASH_ENV makes every shell run a file; can't be checked")
-            if m:
-                check_bash(m.group(2), root, role, depth + 1, cur)
+        check_startup_hook_vars(seg.words, words)
         first = os.path.basename(words[0]) if words else ""
         assignish = any(re.match(r"^\w+\+?=", w) for w in seg.words) or first in {
             "export", "declare", "typeset", "local", "readonly"}
