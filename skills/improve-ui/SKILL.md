@@ -28,19 +28,23 @@ evidence before and after.
 2. **Check tools.** Is a browser tool available (Claude in Chrome, Playwright MCP, built-in
    browser)? If not, say up front that G5 will be at most "static review only" and
    visual verification will be `BLOCKED`.
-3. **Baseline.** Ledger: `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "ui: <target>" --kind improve-ui --mode medium`.
+3. **Baseline.** Ledger: `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "ui: <target>" --kind improve-ui --mode medium`
+   (medium until step 4 sizes it).
    Spawn `engineering-team:ux-reviewer` on the current state: the journey, desktop + mobile,
    states, accessibility. Its findings (`U0-n`) are the problem list.
 4. **Decide.** Turn the user's complaint + baseline findings into ACs ("AC-1: on 375px the
    form fits without horizontal scroll"). Pick the changes that matter most. Don't redesign
    what the user didn't ask about. If a change alters product behavior or branding, ask
-   first.
+   first. Size the change with `${CLAUDE_PLUGIN_ROOT}/workflows/routing.md`; if it is small
+   (markup/style only, 1-2 files, not security-sensitive), set `mode` to `small` in the ledger.
 5. **Implement.** Small → yourself. Otherwise `engineering-team:developer` with the ACs, the
    design-system constraints, and the baseline findings. Reuse existing components and
    tokens. No one-off colors or spacing values.
 6. **Verify.** Fresh `engineering-team:ux-reviewer` re-walks the same journey at the same
-   widths and checks the ACs and baseline findings. Plus `engineering-team:code-reviewer`
-   if the change has logic beyond markup/styles. Loop per
+   widths and checks the ACs and baseline findings; it fills G5. G2 follows
+   `${CLAUDE_PLUGIN_ROOT}/quality/gates.md`: in small mode you self-review the diff and say
+   so in the evidence; in medium/large a fresh `engineering-team:code-reviewer` reads it,
+   even when the change is only markup/styles. Loop per
    `${CLAUDE_PLUGIN_ROOT}/workflows/review-loop.md` (max 3 cycles).
 7. **Tests.** Run the project's tests/lint/typecheck (G3/G4). Visual changes still
    break snapshot and component tests.

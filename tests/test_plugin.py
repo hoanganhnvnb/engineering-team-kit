@@ -92,6 +92,17 @@ class PluginStructure(unittest.TestCase):
         self.assertIn("S<cycle>-<n>", reviewer)
         self.assertIn("`S` security pass", " ".join(findings.split()))
 
+    def test_small_diff_self_review_has_a_security_exception(self):
+        review = " ".join((ROOT / "skills" / "review" / "SKILL.md").read_text().split())
+        self.assertIn("not security-sensitive", review)
+        self.assertIn("always get an independent reviewer", review)
+
+    def test_improve_ui_sizing_and_g2_follow_routing_and_gates(self):
+        text = " ".join((ROOT / "skills" / "improve-ui" / "SKILL.md").read_text().split())
+        self.assertIn("workflows/routing.md", text)
+        self.assertIn("quality/gates.md", text)
+        self.assertIn("it fills G5", text)
+
     def test_versions_agree(self):
         entry = next(p for p in MARKET["plugins"] if p["name"] == NAME)
         self.assertEqual(entry.get("version"), PLUGIN["version"])

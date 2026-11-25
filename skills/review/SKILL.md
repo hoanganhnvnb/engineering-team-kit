@@ -30,7 +30,9 @@ their findings are real before they reach the user.
    messages, PR description, or linked issue. Turn that into ACs for the reviewer. If
    nothing states the intent, review for correctness and safety only and say so.
 3. **Ledger:** `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "review: <target>" --kind review`
-4. **Review.** Small diff (< ~50 lines): you may review it yourself, but say so. Otherwise
+4. **Review.** A small diff (< ~50 lines) that is not security-sensitive: you may review
+   it yourself, but say so. Security-sensitive changes (auth, permissions, payments, user
+   data, secrets handling) always get an independent reviewer, whatever their size. Otherwise
    spawn a fresh `engineering-team:code-reviewer` (or the project's own reviewer agent)
    with the brief from `${CLAUDE_PLUGIN_ROOT}/workflows/briefs.md`. In parallel, if they
    apply: a second reviewer with `lens: security` (security-sensitive code),
