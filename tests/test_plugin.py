@@ -144,6 +144,10 @@ class PluginStructure(unittest.TestCase):
         self.assertIn("bash scripts/selftest.sh", readme)
         self.assertNotIn("./scripts/selftest.sh", readme)
 
+    def test_limitations_mention_exec_guard_caveat(self):
+        text = " ".join((ROOT / "docs" / "limitations.md").read_text().split())
+        self.assertIn("`etk.sh exec` is only as guarded as the guard's wrapper handling", text)
+
     def test_versions_agree(self):
         entry = next(p for p in MARKET["plugins"] if p["name"] == NAME)
         self.assertEqual(entry.get("version"), PLUGIN["version"])

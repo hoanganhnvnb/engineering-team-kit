@@ -64,6 +64,11 @@ Honest list. If one of these bites you, an issue is welcome.
   blocks rather than guesses, but it can't promise to catch everything. Real isolation
   needs OS-level controls: a container or VM, a read-only mount or separate user for the
   read-only roles, and credentials that can't push or deploy.
+- **`etk.sh exec` is only as guarded as the guard's wrapper handling.** `exec <gate> --type t
+  -- <cmd>` runs `<cmd>` itself, so for a guarded role the command text is only checked to
+  the extent the guard looks through that wrapper. It refuses an empty command, and no skill
+  pre-approves it in `allowed-tools`, so the main session is asked before it runs. Treat it
+  like any other command runner.
 - **MCP tools are judged by name only.** For the plugin's subagents the guard blocks MCP
   tools whose name contains a write-style word (`push`, `merge`, `create`, `delete`,
   `write`, `update`, `publish`, `deploy` and a few more), and lets browser tools
