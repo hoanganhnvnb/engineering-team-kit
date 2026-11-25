@@ -3,7 +3,7 @@ name: fix
 description: Fix a bug with the small AI team. Reproduce it with a failing test first, find the root cause, fix minimally, review independently when the fix is non-trivial, and prove there's no regression.
 argument-hint: <bug description, error, or issue link>
 disable-model-invocation: true
-allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run:*)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover:*), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run:*), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" profile:*)
 ---
 
 # /engineering-team:fix
@@ -18,7 +18,7 @@ how to trigger it) and stop.
 
 ## Project snapshot
 
-!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover --data "${CLAUDE_PLUGIN_DATA}"`
 
 ## Steps
 
@@ -61,5 +61,8 @@ how to trigger it) and stop.
 
 ## Safety
 
-Same as build: no commits unless asked, never push/deploy, never discard the user's
-uncommitted changes, no secrets, no `PASS` without evidence from this session.
+Same as build. Only the Lead commits, pushes, merges or deploys, following your workflow
+profile and the permission you gave in this conversation; subagents never do. If the run
+passes and shipping was asked for (or the profile says auto), continue with
+`${CLAUDE_PLUGIN_ROOT}/workflows/ship.md`. Never discard the user's uncommitted changes,
+no secrets, no `PASS` without evidence from this session.

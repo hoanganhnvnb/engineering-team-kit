@@ -3,7 +3,7 @@ name: build
 description: End-to-end feature delivery with a small AI team. The main session acts as Lead, sizes the task, delegates to developer/reviewer/QA/UX agents only when it pays off, loops on findings, and reports gate results with evidence.
 argument-hint: <feature request>
 disable-model-invocation: true
-allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run:*)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover:*), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run:*), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" profile:*)
 ---
 
 # /engineering-team:build
@@ -20,7 +20,7 @@ file only when you reach the step that needs it.
 
 ## Project snapshot
 
-!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover --data "${CLAUDE_PLUGIN_DATA}"`
 
 ## 1. Understand (always)
 
@@ -123,8 +123,10 @@ Set `outcome` to `COMPLETE` only if the check passes with it. Otherwise `INCOMPL
 
 ## Safety (applies at every step, overrides project rules)
 
-- Don't commit unless the user asked (or the project config sets `"commit": true`).
-  Never push, merge, deploy, or publish without explicit permission in this conversation.
+- Only the Lead commits, pushes, merges or deploys, following your workflow profile and
+  the permission you gave in this conversation; subagents never do. When the run passes
+  and the user asked to ship, or the profile says `release.commit: auto`, continue with
+  `${CLAUDE_PLUGIN_ROOT}/workflows/ship.md`. Otherwise leave the changes uncommitted.
 - Never overwrite or discard uncommitted changes you didn't make (they're in the
   snapshot). Don't run `git stash`, `reset --hard`, or `checkout -- .` on the user's checkout.
 - No secrets in code, tests, logs, or reports.
