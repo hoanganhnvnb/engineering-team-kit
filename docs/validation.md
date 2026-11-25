@@ -122,6 +122,39 @@ schema doesn't allow, and two graders could pass without the agent doing anythin
   the checker changed mid-run. The format is now spelled out in `skills/build/SKILL.md` and
   `quality/gates.md`, and the checker's messages say what's expected.
 
+## 0.4.0 ship flow
+
+`tests/e2e/run.py --ship` adds a local bare repository as `origin`, a `deploy.sh` that leaves a
+marker file beside the project, and a confirmed workflow profile (trunk, push `auto`, one
+non-production `staging` target). The prompts are plain requests with no slash command, so
+they also test whether `team` is picked up on its own. Date 2026-11-25, `acceptEdits` and the
+runner's allowlist.
+
+| # | Request | `team` used | Agents | Pushed | Deployed | Ledger check | Independent re-run | Time / cost |
+|---|---|---|---|---|---|---|---|---|
+| S1 | fix the qty bug; "khi review và test pass thì commit, push và deploy staging luôn" | yes | 2 × fresh code-reviewer | yes | yes, verify step passed | OK | `npm test` exit 0 (8 tests) | 230 s / $1.60 |
+| S2 | fix the qty bug; review and test it, commit and push when it passes | yes | 2 × fresh code-reviewer | yes | no (not asked) | OK | `npm test` exit 0 | 219 s / $1.58 |
+| S3 | fix the qty bug, but don't push | no | code-reviewer | no | no | none (no ledger) | `npm test` exit 0 | 65 s / $0.62 |
+
+What they showed:
+- **Permission came from the user's words, not the profile alone.** S1 recorded the deploy
+  permission with the user's sentence quoted, ran `sh deploy.sh` and then the verify step.
+  S2 pushed because the profile says push `auto` and the request asked for it. It said deploy
+  was skipped because nobody asked.
+- **The first reviewer found a regression the fix caused** in both S1 and S2. Adding instead
+  of replacing meant a string `qty` would concatenate (`2 + "3"` → `"23"`). The Lead fixed it,
+  and a second, fresh reviewer verified it before anything was committed.
+- **Only the run's files were committed**, with a `fix(cart): …` subject.
+- **S3 didn't use `team`.** The model fixed the bug directly and still asked a reviewer, and
+  it didn't push. That's acceptable for a one-line fix with "don't push", but it shows the
+  skill isn't picked for every fix request. Use `/engineering-team:team` when you want the
+  whole flow.
+- **Two earlier S1 attempts failed for harness reasons, and both were caught by the checks.**
+  The first ran while the profile-hash rule was being added, so `run check` failed it. The
+  second used a profile file the runner wrote by hand without `profile confirm`. The new
+  checkout binding treated that profile as unconfirmed, so the Lead stopped before committing
+  and asked. The runner now confirms the profile the way onboarding does.
+
 ## Caveats
 
 - B–G ran with `--permission-mode bypassPermissions` (the runner's default at the time)
