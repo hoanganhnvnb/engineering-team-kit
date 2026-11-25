@@ -495,8 +495,17 @@ STARTUP_VARS = (
     + [("dev", c, "allow") for c in ["NODE_ENV=test npm test", "echo ENV", "git grep -n ENV src", "export FOO=1"]]
 )
 
+# Wrapper write targets inside nested commands.
+NESTED_TIME_OUTPUT = (
+    [("dev", "find . -name x -exec time -o .env npm test \\;", "block"),
+     ("dev", "find . -execdir time --output=.env npm test \\;", "block"),
+     ("rev", "find . -name x -exec time -o src/a.js npm test \\;", "block"),
+     ("qa", "find . -name x -exec time -o src/a.js npm test \\;", "block"),
+     ("dev", "find . -name x -exec time -o /tmp/t npm test \\;", "allow")]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT)
 
 
 def make_project(base: Path) -> Path:

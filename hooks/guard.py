@@ -745,7 +745,8 @@ def check_find(args: list[str], root: str, role: str, depth: int, cur: str | Non
             continue
         end = next((k for k in range(j + 1, len(exprs)) if exprs[k] in {";", "+"}), len(exprs))
         for r in roots:
-            check_words(program([w.replace("{}", r) for w in exprs[j + 1:end]]), root, role, depth + 1, cur)
+            words, outputs = program_ex([w.replace("{}", r) for w in exprs[j + 1:end]])
+            check_words(words, root, role, depth + 1, cur, None, outputs)
 
 
 def check_write_target(target: str, role: str, root: str, cur: str | None) -> None:
