@@ -398,8 +398,53 @@ WRAPPER_EDGES = (
        ("qa", "npm test > /dev/null", "allow")]
 )
 
+# A cd may have failed, so later `;`/`||`/newline commands may run elsewhere; string-evaluating
+# builtins; CDPATH set through expansion; stdin named relative to the tracked directory.
+CD_LATER_AND_BUILTINS = (
+    [("dev", c, "block") for c in [
+        "cd src && ls; rm -rf ../x",
+        "cd src && ls || rm -rf ../x",
+        "cd src && ls\nrm -rf ../x",
+        "cd src && echo a; rm -rf build",
+        "pushd src && ls; popd && rm -rf x",
+        "trap 'git push' EXIT",
+        "trap 'echo hi' DEBUG",
+        "trap 'echo hi' ERR",
+        "trap 'echo hi' RETURN",
+        "trap 'git push' INT",
+        "trap 'cd ..' INT; rm -rf other",
+        "mapfile -C 'git push' -c 1 < /tmp/f",
+        "readarray -C 'git push' -c 1 < /tmp/f",
+        "complete -C 'git push' foo",
+        "bind -x '\"\\C-x\":git push'",
+        "PROMPT_COMMAND='git push'",
+        "export PROMPT_COMMAND='git push'",
+        "BASH_ENV=x.sh npm test",
+        "export X=$(pwd); cd src && rm -rf build",
+        "export V=CDPATH; export $V=/etc; cd x && rm -rf y",
+        "read CDPATH; cd x && rm -rf y",
+        "printf -v CDPATH %s /etc; cd x && rm -rf y",
+        "declare -x $N=/etc; cd x && rm -rf y",
+        "cd /dev && bash stdin",
+        "cd /proc/self/fd && sh 0",
+        "cd $X && bash script.sh",
+        "bash stdin-link",
+    ]]
+    + [("rev", "cd /tmp && ls; echo x > z", "block")]
+    + [("dev", c, "allow") for c in [
+        "(cd src && ls); rm -rf build",
+        "cd src && ls && rm -rf build",
+        "trap - INT",
+        "trap 'rm -rf build' INT",
+        "mapfile -t a < /tmp/f",
+        "X=1 && cd src && rm -rf build",
+        "export X=$(pwd); cd /tmp && rm -rf scratch",
+        "cd src && bash ../scripts/run.sh",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS)
 
 
 def make_project(base: Path) -> Path:
@@ -413,6 +458,7 @@ def make_project(base: Path) -> Path:
     (base / "src" / "a.js").write_text("a\n")
     (base / "tests" / "existing.test.js").write_text("t\n")
     (base / "README.md").write_text("r\n")
+    os.symlink("/dev/stdin", base / "stdin-link")
     run("git", "add", "-A")
     run("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init")
     run("git", "branch", "feature")

@@ -56,6 +56,14 @@ Honest list. If one of these bites you, an issue is welcome.
   secret files, writes by reviewers). A deliberately obfuscated command, or code inside a
   test file that `npm test` then runs, can still get past it. Use your normal Claude Code
   permission settings and, for untrusted code, a container.
+- **It is a best-effort tripwire built on a static shell parse, not a sandbox.** It reads the
+  command text and guesses what the shell will do (which directory later segments run in,
+  what a wrapper or option swallows, what `eval`, `trap` or a here-string will execute).
+  Shells have more ways to surprise a static reader than any list covers, so expect the
+  occasional bypass and the occasional false block. Where the parse is ambiguous the guard
+  blocks rather than guesses, but it can't promise to catch everything. Real isolation
+  needs OS-level controls: a container or VM, a read-only mount or separate user for the
+  read-only roles, and credentials that can't push or deploy.
 - **It only covers the plugin's subagents.** The main session (the Lead) runs under your
   own permission settings. The Lead is told not to push, deploy, or discard work, and the
   skills say so, but no hook enforces it for the main session. A plugin shouldn't change

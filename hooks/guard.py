@@ -611,7 +611,7 @@ def runs_inline_code(words: list[str]) -> bool:
     return not args or any(INLINE_FLAG.match(a) for a in args)
 
 
-def next_dir(words: list[str], cur: str | None, dirs: list) -> str | None:
+def next_dir(words: list[str], cur: str | None, dirs: list, cdpath_unknown: bool = False) -> str | None:
     """Working directory after `cd`/`pushd`/`popd`; None once it can't be known.
 
     `dirs` is the pushd stack; a "?" entry means a stack operation we didn't model.
@@ -632,27 +632,29 @@ def next_dir(words: list[str], cur: str | None, dirs: list) -> str | None:
         dirs.append(cur)
     if target is None or target == "-" or target.startswith("~") or re.search(r"[$`*?\[(]", target):
         return None
-    if os.environ.get("CDPATH") and not target.startswith(("/", "./", "../")) and target not in {".", ".."}:
+    if (cdpath_unknown or os.environ.get("CDPATH")) and not target.startswith(("/", "./", "../")) and target not in {".", ".."}:
         return None  # an inherited CDPATH can send a bare `cd x` anywhere
     joined = absjoin(target, cur)
     return None if joined is None else os.path.normpath(joined)
 
 
-def reads_stdin(operand: str) -> bool:
-    """`-`, or anything under /dev or /proc (/dev/stdin, /dev/fd/0, /proc/self/fd/0 and their spellings)."""
+def reads_stdin(operand: str, cur: str | None) -> bool:
+    """`-`, or anything that resolves under /dev or /proc from where the shell is (symlinks included)."""
     if operand == "-":
         return True
-    path = os.path.normpath(re.sub(r"/{2,}", "/", operand))
-    return path.startswith(("/dev/", "/proc/"))
+    path = absjoin(re.sub(r"/{2,}", "/", operand), cur)
+    if path is None:
+        return True  # relative to a directory we can't know
+    return any(p.startswith(("/dev/", "/proc/")) for p in (os.path.normpath(path), os.path.realpath(path)))
 
 
 SHELL_OPT_WITH_ARG = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
 
 
-def shell_input(prog: str, args: list[str]) -> tuple[str, str | None]:
+def shell_input(prog: str, args: list[str], cur: str | None) -> tuple[str, str | None]:
     """Where a shell gets its commands: ("script", text) for -c, ("stdin", None), or ("file", None)."""
     if prog in {"source", "."}:
-        return ("stdin", None) if args[:1] and reads_stdin(args[0]) else ("file", None)
+        return ("stdin", None) if args[:1] and reads_stdin(args[0], cur) else ("file", None)
     i, c_flag, s_flag = 0, False, False
     while i < len(args):
         w = args[i]
@@ -678,7 +680,7 @@ def shell_input(prog: str, args: list[str]) -> tuple[str, str | None]:
         if not operands:
             raise Blocked(f"`{prog} -c` without a script can't be checked")
         return "script", operands[0]
-    if s_flag or not operands or reads_stdin(operands[0]):
+    if s_flag or not operands or reads_stdin(operands[0], cur):
         return "stdin", None
     return "file", None
 
@@ -737,6 +739,22 @@ def check_write_target(target: str, role: str, root: str, cur: str | None) -> No
         raise Blocked("qa-engineer may only create new files, not change existing ones")
 
 
+def callback_scripts(prog: str, args: list[str]) -> list[str]:
+    """Command strings handed to builtins that run them later (mapfile -C, complete -C, bind -x)."""
+    flag = {"mapfile": "C", "readarray": "C", "complete": "C", "bind": "x"}.get(prog)
+    out = []
+    for i, w in enumerate(args):
+        if flag is None or not w.startswith("-") or w.startswith("--") or flag not in w[1:]:
+            continue
+        if w.endswith(flag) and i + 1 < len(args):
+            out.append(args[i + 1])
+        elif not w.endswith(flag):
+            out.append(w[w.index(flag) + 1:])
+    if prog == "bind":
+        out = [v[v.rfind('":') + 2:] if '":' in v else v.split(":", 1)[-1] for v in out]
+    return out
+
+
 def check_words(words: list[str], root: str, role: str, depth: int, cur: str | None, seg: Seg | None = None,
                 raw: list[str] | None = None) -> None:
     """Judge one simple command (already stripped of wrappers and shell keywords)."""
@@ -749,8 +767,17 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
     if prog == "eval":
         check_bash(" ".join(words[1:]), root, role, depth + 1, cur)
         return
+    if prog == "trap":
+        ops = [w for w in words[1:] if w != "--"]
+        if ops[:1] not in (["-l"], ["-p"]):
+            if any(re.sub(r"^SIG", "", x.upper()) in {"DEBUG", "RETURN", "ERR", "EXIT", "0"} for x in ops[1:]):
+                raise Blocked("`trap` on EXIT/ERR/DEBUG/RETURN runs code later that can't be checked")
+            if ops and ops[0] != "-":
+                check_bash(ops[0], root, role, depth + 1, cur)
+    for script in callback_scripts(prog, words[1:]):
+        check_bash(script, root, role, depth + 1, cur)
     if prog in SHELLS or prog in {"source", "."}:
-        mode, script = shell_input(prog, words[1:])
+        mode, script = shell_input(prog, words[1:], cur)
         if mode == "script":
             check_bash(script, root, role, depth + 1, cur)
         elif mode == "stdin":
@@ -804,13 +831,15 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         raise Blocked(f"{role} is read-only; inline code that writes files isn't allowed")
     dirs: list = []
     groups: list = []
+    pending = False  # a cd whose success we assumed; a later `;`/`||` may run where it failed
+    taint = False  # something may have set CDPATH through an expansion
     for seg in events:
         if seg is PUSH:
-            groups.append((cur, list(dirs)))
+            groups.append((cur, list(dirs), pending))
             continue
         if seg is POP:
             if groups:
-                cur, dirs = groups.pop()
+                cur, dirs, pending = groups.pop()
             continue
         for body in seg.subs:
             check_bash(body, root, role, depth + 1, cur)
@@ -818,18 +847,34 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             check_bash(body, root, role, depth + 1, cur)
         words = program(seg.words)
         in_pipe = seg.sep in {"|", "|&"} or seg.after in {"|", "|&", "&"}
+        if pending and not in_pipe and seg.sep in {";", "||"}:
+            cur, dirs[:], pending = None, ["?"], False
+        for w in seg.words:
+            m = re.match(r"^(PROMPT_COMMAND|BASH_ENV)\+?=(.*)$", w, re.S)
+            if m and m.group(1) == "BASH_ENV":
+                raise Blocked("BASH_ENV makes every shell run a file; can't be checked")
+            if m:
+                check_bash(m.group(2), root, role, depth + 1, cur)
+        first = os.path.basename(words[0]) if words else ""
+        assignish = any(re.match(r"^\w+\+?=", w) for w in seg.words) or first in {
+            "export", "declare", "typeset", "local", "readonly"}
+        if (assignish and (seg.subs or any(re.search(r"[$`]", w) for w in seg.words))) \
+                or first == "read" or (first == "printf" and "-v" in words):
+            taint = True
         if any(re.search(r"\bCDPATH\b", w) for w in seg.words) and not in_pipe:
             cur = None  # `cd x` may land somewhere else entirely
         if words and os.path.basename(words[0]) in {"cd", "pushd", "popd"}:
-            new = next_dir(words, cur, list(dirs) if in_pipe else dirs)
+            new = next_dir(words, cur, list(dirs) if in_pipe else dirs, taint)
             if not in_pipe:
-                # after `;` or `||` the cd may have failed, leaving us where we were
-                cur = None if seg.after in {";", "||"} else new
+                if seg.after in {";", "||"}:  # the cd may have failed, leaving us where we were
+                    cur, dirs[:], pending = None, ["?"], False
+                else:
+                    cur, pending = new, True
             continue
         if not in_pipe and any(os.path.basename(w) in {"cd", "pushd", "popd"} for w in words[1:]):
             cur = None  # a cd we can't attribute (find -exec cd, xargs cd): stay strict
         check_words(words, root, role, depth, cur, seg, seg.words)
-        if words and os.path.basename(words[0]) in {"eval", "source", "."} and not in_pipe:
+        if words and os.path.basename(words[0]) in {"eval", "source", ".", "trap"} and not in_pipe:
             cur, dirs[:] = None, ["?"]  # whatever it did to the directory isn't visible to us
 
 
