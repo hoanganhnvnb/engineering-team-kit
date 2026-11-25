@@ -23,6 +23,7 @@ AC-1 …  AC-2 …
 - Commands: test `<cmd>` · lint `<cmd>` · typecheck `<cmd>`
 - Invariants / protected areas: <from config or docs: must not change>
 - Existing user changes: <uncommitted paths that are not ours; don't touch>
+- Conventions: <absolute paths of the conventions/ topics that apply, from the snapshot's Conventions line; e.g. …/conventions/naming.md, …/style.md>
 
 ## Scope
 - You own: <files/dirs this agent may change>
@@ -62,8 +63,10 @@ Do not rely on any summary; read the code.
 Your standard format: verdict + findings JSON.
 ```
 
-Don't send the developer's self-assessment to the reviewer. Send the ACs and the diff
-location. The point is an independent read.
+Don't send the developer's self-assessment to the reviewer, or your own conclusions
+("looks fine", "just confirm"). Send the request, the ACs, the diff location and the doc
+paths. The point is an independent read. Subagents never see this conversation or the
+skill text: anything they must obey goes in the brief or is already in their agent file.
 
 ## QA brief: add
 
