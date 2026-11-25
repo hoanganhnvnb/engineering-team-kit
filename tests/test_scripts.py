@@ -921,7 +921,7 @@ class LauncherPythonTests(unittest.TestCase):
         """Answers the launcher's version probe (`-c`), otherwise reports which fake ran the script."""
         (self.bin / name).write_text(
             "#!/bin/sh\n"
-            f'if [ "$1" = "-c" ]; then exit {0 if version_ok else 1}; fi\n'
+            f'if [ "$1" = "-c" ]; then {"echo etk-ok; exit 0" if version_ok else "exit 1"}; fi\n'
             f'echo "FAKE {name} $*"\n')
         (self.bin / name).chmod(0o755)
 
@@ -958,7 +958,7 @@ class LauncherPythonTests(unittest.TestCase):
         home = self.tmp / "home"
         found = home / ".pyenv" / "versions" / "3.12.8" / "bin"
         found.mkdir(parents=True)
-        (found / "python3").write_text("#!/bin/sh\n[ \"$1\" = -c ] && exit 0\necho FAKE pyenv-3.12.8 \"$@\"\n")
+        (found / "python3").write_text("#!/bin/sh\n[ \"$1\" = -c ] && { echo etk-ok; exit 0; }\necho FAKE pyenv-3.12.8 \"$@\"\n")
         (found / "python3").chmod(0o755)
         old = home / ".pyenv" / "versions" / "3.8.0" / "bin"
         old.mkdir(parents=True)
@@ -968,7 +968,7 @@ class LauncherPythonTests(unittest.TestCase):
         r = subprocess.run(["/bin/sh", str(script), "run", "latest"], env=env, capture_output=True, text=True, timeout=30)
         self.assertIn("FAKE pyenv-3.12.8", r.stdout, r.stderr)
         mine = self.tmp / "mine"
-        mine.write_text("#!/bin/sh\n[ \"$1\" = -c ] && exit 0\necho FAKE mine \"$@\"\n")
+        mine.write_text("#!/bin/sh\n[ \"$1\" = -c ] && { echo etk-ok; exit 0; }\necho FAKE mine \"$@\"\n")
         mine.chmod(0o755)
         r = subprocess.run(["/bin/sh", str(script), "run", "latest"], env=dict(env, ETK_PYTHON=str(mine)),
                            capture_output=True, text=True, timeout=30)
@@ -985,12 +985,45 @@ class LauncherPythonTests(unittest.TestCase):
                 base = self.tmp / var.lower()
                 found = base / rel
                 found.mkdir(parents=True)
-                (found / "python3").write_text("#!/bin/sh\n[ \"$1\" = -c ] && exit 0\necho FAKE custom \"$@\"\n")
+                (found / "python3").write_text("#!/bin/sh\n[ \"$1\" = -c ] && { echo etk-ok; exit 0; }\necho FAKE custom \"$@\"\n")
                 (found / "python3").chmod(0o755)
                 env = {"PATH": str(self.bin), "HOME": str(self.tmp / "empty"), var: str(base)}
                 r = subprocess.run(["/bin/sh", str(script), "run", "latest"], env=env, capture_output=True,
                                    text=True, timeout=30)
                 self.assertIn("FAKE custom", r.stdout, r.stderr)
+
+    def test_a_candidate_must_report_3_12_itself_and_overrides_must_be_absolute(self):
+        script = self.without_absolute_pythons(ROOT / "scripts" / "etk.sh")
+        home = self.tmp / "home2"
+        liar = home / ".pyenv" / "versions" / "0" / "bin"
+        liar.mkdir(parents=True)
+        (liar / "python3").symlink_to("/bin/true")  # exits 0 for every probe, but is not a Python
+        env = {"PATH": str(self.bin), "HOME": str(home)}
+        r = subprocess.run(["/bin/sh", str(script), "run", "latest"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 127, r.stdout + r.stderr)
+        # a relative ETK_PYTHON would resolve inside the project, so it is ignored
+        rel = self.tmp / "proj" / "bin"
+        rel.mkdir(parents=True)
+        (rel / "python3").write_text("#!/bin/sh\n[ \"$1\" = -c ] && { echo etk-ok; exit 0; }\necho FAKE relative\n")
+        (rel / "python3").chmod(0o755)
+        r = subprocess.run(["/bin/sh", str(script), "run", "latest"], env=dict(env, ETK_PYTHON="bin/python3"),
+                           cwd=self.tmp / "proj", capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 127, r.stdout + r.stderr)
+
+    def test_guard_wrapper_blocks_plugin_agents_when_the_finder_is_missing_in_any_shell(self):
+        hooks = self.tmp / "hooks"
+        hooks.mkdir()
+        (hooks / "run-guard.sh").write_text((ROOT / "hooks" / "run-guard.sh").read_text())  # no ../scripts
+        plugin_call = '{"agent_type":"engineering-team:developer"}'
+        other_call = '{"tool_name":"Bash","tool_input":{"command":"ls"}}'
+        shells = [["/bin/sh"], ["bash", "--posix"], ["bash"]]
+        for shell in shells:
+            for stdin, want in ((plugin_call, 2), (other_call, 0)):
+                with self.subTest(shell=shell, want=want):
+                    env = {"PATH": os.environ["PATH"]}
+                    r = subprocess.run([*shell, str(hooks / "run-guard.sh")], input=stdin, env=env,
+                                       capture_output=True, text=True, timeout=30)
+                    self.assertEqual(r.returncode, want, r.stderr)
 
     def test_etk_launcher_names_the_requirement_when_none_qualifies(self):
         self.fake_python("python3", version_ok=False)

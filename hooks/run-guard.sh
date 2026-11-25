@@ -7,7 +7,14 @@ case "$input" in
   *) exit 0 ;;
 esac
 here=$(dirname "$0")
-. "$here/../scripts/find-python.sh" || exit 2
+# Block when the finder is missing. In POSIX-mode bash a failed `.` ends the shell with status 1,
+# which Claude Code treats as a non-blocking error, so check first and use `command .`.
+finder=$here/../scripts/find-python.sh
+if [ ! -r "$finder" ]; then
+  echo "[engineering-team guard] $finder is missing; blocking this call" >&2
+  exit 2
+fi
+command . "$finder" || exit 2
 if etk_find_python; then
   printf '%s' "$input" | "$ETK_PY" "$here/guard.py"
   rc=$?

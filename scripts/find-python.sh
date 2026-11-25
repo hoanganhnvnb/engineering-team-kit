@@ -10,8 +10,9 @@
 ETK_PY_NAMES="python3 python3.13 python3.12 python"
 ETK_PY_ABS="/usr/bin/python3.12 /usr/local/bin/python3.12 /opt/homebrew/bin/python3.12 /usr/bin/python3 /usr/local/bin/python3 /opt/homebrew/bin/python3"
 
+# The interpreter must say so itself: an exit status alone would let `true` pass.
 etk_py_ok() {
-  "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1
+  [ "$("$1" -c 'import sys; print("etk-ok" if sys.version_info >= (3, 12) else "")' 2>/dev/null)" = etk-ok ]
 }
 
 etk_try() {
@@ -20,13 +21,17 @@ etk_try() {
 
 etk_find_python() {
   ETK_PY=""
-  etk_try "${ETK_PYTHON:-}" && return 0
+  # Overrides count only as absolute paths; a relative one would resolve inside the project.
+  case ${ETK_PYTHON:-} in /*) etk_try "$ETK_PYTHON" && return 0 ;; esac
   for c in $ETK_PY_NAMES $ETK_PY_ABS; do
     etk_try "$c" && return 0
   done
   h=${HOME:-/nonexistent}
-  for c in "${PYENV_ROOT:-$h/.pyenv}"/versions/*/bin/python3 \
-           "${UV_PYTHON_INSTALL_DIR:-$h/.local/share/uv/python}"/*/bin/python3 \
+  pyenv=$h/.pyenv
+  uvdir=$h/.local/share/uv/python
+  case ${PYENV_ROOT:-} in /*) pyenv=$PYENV_ROOT ;; esac
+  case ${UV_PYTHON_INSTALL_DIR:-} in /*) uvdir=$UV_PYTHON_INSTALL_DIR ;; esac
+  for c in "$pyenv"/versions/*/bin/python3 "$uvdir"/*/bin/python3 \
            "$h"/.asdf/installs/python/*/bin/python3 "$h"/.local/share/mise/installs/python/*/bin/python3 \
            "$h"/.local/bin/python3.12; do
     etk_try "$c" && return 0

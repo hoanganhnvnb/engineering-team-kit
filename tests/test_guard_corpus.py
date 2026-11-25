@@ -1407,7 +1407,7 @@ class GuardCorpus(unittest.TestCase):
     def test_wrapper_blocks_when_guard_crashes(self):
         with tempfile.TemporaryDirectory() as tmp:
             fake = Path(tmp) / "python3"
-            fake.write_text('#!/bin/sh\nif [ "$1" = "-c" ]; then exit 0; fi\nexit 1\n')
+            fake.write_text('#!/bin/sh\nif [ "$1" = "-c" ]; then echo etk-ok; exit 0; fi\nexit 1\n')
             fake.chmod(0o755)
             env = dict(os.environ, PATH=f"{tmp}:{os.environ['PATH']}")
             payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": "/",

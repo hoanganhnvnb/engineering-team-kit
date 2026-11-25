@@ -5,7 +5,7 @@ installer script and never edits your settings files by hand. The `claude plugin
 commands add entries to your settings without overwriting what's there.
 
 Requirements: Claude Code with plugin support (built and tested on 2.1.329), `git`, and
-Python 3.12+ (the scripts and hook use the standard library only). It is found on `PATH` (`python3`, `python3.13`, `python3.12`), in the usual system folders, or in the folders pyenv, uv, asdf and mise install to. If yours lives somewhere else, set `ETK_PYTHON=/path/to/python3.12`. Without one, the plugin's subagents are blocked by the guard until you install Python or disable the plugin, and the error message says how.
+Python 3.12+ (the scripts and hook use the standard library only). It is found on `PATH` (`python3`, `python3.13`, `python3.12`, `python`), in the usual system folders, in `~/.local/bin/python3.12`, or in the folders pyenv, uv, asdf and mise install to. If yours lives somewhere else, set `ETK_PYTHON=/path/to/python3.12`. Without one, the plugin's subagents are blocked by the guard until you install Python or disable the plugin, and the error message says how.
 
 ## If Python 3.12+ is not found
 
@@ -32,8 +32,10 @@ Fix it in one of these ways:
 
 Limits:
 
-- It looks only at `PATH`, the system folders, `$ETK_PYTHON` and the pyenv, uv, asdf and
-  mise folders under your home. conda or a custom location needs `ETK_PYTHON`.
+- It looks only at `PATH`, the system folders, `$ETK_PYTHON`, `~/.local/bin/python3.12` and
+  the pyenv, uv, asdf and mise folders under your home. `ETK_PYTHON`, `PYENV_ROOT` and
+  `UV_PYTHON_INSTALL_DIR` count only as absolute paths. A candidate must report that it is
+  3.12+ itself, not just exit 0. conda or a custom location needs `ETK_PYTHON`.
 - It never downloads or installs Python, and never searches the project folder.
 - Native Windows isn't supported (the launchers are `sh`); use WSL.
 - If you can't install 3.12, there is no reduced mode. The guard is what lets subagents
