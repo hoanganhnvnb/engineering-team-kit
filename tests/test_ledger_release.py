@@ -15,6 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ETK = ROOT / "scripts" / "etk_run.py"
 PROFILE = ROOT / "scripts" / "etk_profile.py"
+_spec = importlib.util.spec_from_file_location("_t_etk_run_rel", ETK)
+etk_run = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(etk_run)
 
 
 def sh(args, cwd, stdin=None):
@@ -386,6 +389,15 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("not a deploy target", r.stderr)
         self.assertEqual(self.ledger(run).get("actions", []), [])
+
+    def test_negation_after_the_target_is_not_permission(self):
+        named = etk_run.word("web-eu")
+        for quote in ("deploy staging thôi, production thì không", "prod: don't", "deploy web-eu? no",
+                      "web-eu thì đừng deploy"):
+            self.assertFalse(etk_run.affirms(quote, named) or etk_run.affirms(quote, etk_run.PROD_WORDS), quote)
+        for quote in ("review không lỗi thì deploy prod luôn", "no errors -> deploy prod",
+                      "tests pass and no regressions then ship to production"):
+            self.assertTrue(etk_run.affirms(quote, etk_run.PROD_WORDS), quote)
 
     def test_hand_edited_profile_needs_a_new_confirm(self):
         run, _ = self.init("--kind", "ship")

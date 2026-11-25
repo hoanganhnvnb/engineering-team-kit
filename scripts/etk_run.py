@@ -491,10 +491,14 @@ def word(name: str) -> re.Pattern:
 
 
 def affirms(quote: str, pattern: re.Pattern) -> bool:
-    """`pattern` occurs in `quote` outside a negated clause ("don't touch prod" doesn't count)."""
+    """`pattern` occurs in `quote` with no negation in its clause, before or after it ("don't touch
+    prod" and "prod: no" don't count). Clauses end at punctuation, `then`/`thì` and arrows."""
     for m in pattern.finditer(quote):
-        clause = CLAUSE_END.split(quote[:m.start()])[-1]
-        if not NEGATION.search(clause):
+        before = CLAUSE_END.split(quote[:m.start()])[-1]
+        # After the match only . ; , ! and newlines end the clause: "prod: don't", "web-eu? no",
+        # "production thì không".
+        after = re.split(r"[.;,!\n]", quote[m.end():])[0]
+        if not NEGATION.search(before) and not NEGATION.search(after):
             return True
     return False
 
