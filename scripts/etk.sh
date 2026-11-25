@@ -1,8 +1,6 @@
 #!/bin/sh
 # Run one of the plugin's scripts with the first Python that actually works and is
-# 3.12 or newer. A `python3` on PATH can be a broken shim (pyenv/asdf without its
-# root, a deleted venv) or an old system Python, so each candidate is tried before
-# it's used.
+# 3.12 or newer (see find-python.sh: $ETK_PYTHON, PATH, system paths, pyenv/uv/asdf/mise).
 #   etk.sh discover            project snapshot
 #   etk.sh run <args...>       ledger: init / check / render / stats / latest
 #   etk.sh profile <sub> --data <plugin data dir> [args...]
@@ -28,10 +26,9 @@ esac
 if [ "$1" != exec ]; then
   shift
 fi
-for py in python3 python3.13 python3.12 /usr/bin/python3 /usr/local/bin/python3 /opt/homebrew/bin/python3 python; do
-  if "$py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1; then
-    exec "$py" "$script" "$@"
-  fi
-done
-echo "engineering-team: Python 3.12+ not found (tried python3, python3.13, python3.12, /usr/bin/python3, /usr/local/bin/python3, /opt/homebrew/bin/python3, python)" >&2
+. "$dir/find-python.sh"
+if etk_find_python; then
+  exec "$ETK_PY" "$script" "$@"
+fi
+echo "engineering-team: $(etk_python_hint)" >&2
 exit 127

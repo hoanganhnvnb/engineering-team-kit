@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -12,15 +13,9 @@ ROOT = Path(__file__).resolve().parent.parent
 SELFTEST = ROOT / "scripts" / "selftest.sh"
 
 
-def _path_candidates_only(text: str) -> str:
-    """selftest.sh with only the PATH-relative interpreter names left in `candidates`."""
-    out = []
-    for line in text.splitlines(keepends=True):
-        if line.startswith("candidates="):
-            names = line.split("=", 1)[1].strip().strip('"').split()
-            line = 'candidates="' + " ".join(n for n in names if not n.startswith("/")) + '"\n'
-        out.append(line)
-    return "".join(out)
+def _without_absolute_candidates(text: str) -> str:
+    """find-python.sh with the absolute system paths emptied, so the runner's own Python can't be found."""
+    return re.sub(r"^ETK_PY_ABS=.*$", 'ETK_PY_ABS=""', text, flags=re.M)
 
 
 class SelftestPython(unittest.TestCase):
@@ -33,11 +28,12 @@ class SelftestPython(unittest.TestCase):
             old.chmod(0o755)
             # A copy without the absolute candidates: on CI runners /usr/bin/python3 or
             # /usr/local/bin/python3 is 3.12+, and the real script would find it outside PATH.
-            script = Path(tmp) / "scripts" / "selftest.sh"
-            script.parent.mkdir()
-            text = SELFTEST.read_text()
-            script.write_text(_path_candidates_only(text))
-            self.assertNotIn("/usr/bin/python3", script.read_text())
+            scripts = Path(tmp) / "scripts"
+            scripts.mkdir()
+            script = scripts / "selftest.sh"
+            script.write_text(SELFTEST.read_text())
+            (scripts / "find-python.sh").write_text(
+                _without_absolute_candidates((ROOT / "scripts" / "find-python.sh").read_text()))
             env = {"PATH": tmp, "HOME": tmp}
             r = subprocess.run([str(Path(tmp) / "bash"), str(script)], capture_output=True, text=True, env=env,
                                timeout=60)
@@ -47,10 +43,15 @@ class SelftestPython(unittest.TestCase):
     def test_script_picks_the_interpreter_from_the_etk_list(self):
         etk = (ROOT / "scripts" / "etk.sh").read_text()
         selftest = SELFTEST.read_text()
+        finder = (ROOT / "scripts" / "find-python.sh").read_text()
         for cand in ("python3", "python3.13", "python3.12", "/usr/bin/python3", "/usr/local/bin/python3",
-                     "/opt/homebrew/bin/python3", "python"):
-            self.assertIn(cand, etk)
-            self.assertIn(cand, selftest)
+                     "/opt/homebrew/bin/python3", "python", "ETK_PYTHON", ".pyenv/versions", ".local/share/uv/python"):
+            self.assertIn(cand, finder)
+        # every launcher shares the one finder instead of keeping its own list
+        for text in (etk, selftest, (ROOT / "hooks" / "run-guard.sh").read_text(),
+                     (ROOT / "evals" / "run.sh").read_text()):
+            self.assertIn("find-python.sh", text)
+            self.assertIn("etk_find_python", text)
         self.assertNotIn("python3 -m unittest", selftest)
 
 

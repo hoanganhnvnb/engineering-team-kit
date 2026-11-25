@@ -863,6 +863,8 @@ class EvalRunTests(unittest.TestCase):
         (root / "evals").mkdir(parents=True)
         (root / "skills" / "one").mkdir(parents=True)
         (root / "evals" / "run.sh").write_text((ROOT / "evals" / "run.sh").read_text())
+        (root / "scripts").mkdir()
+        (root / "scripts" / "find-python.sh").write_text((ROOT / "scripts" / "find-python.sh").read_text())
         (root / "skills" / "one" / "SKILL.md").write_text(skill_text)
         sh(["git", "init", "-q"], root)
         bin_dir = Path(tmp.name) / "bin"
@@ -927,9 +929,13 @@ class LauncherPythonTests(unittest.TestCase):
         """Copy a launcher with the absolute-path candidates removed so the host's own Python can't be found."""
         dst = self.tmp / "copy"
         dst.mkdir(exist_ok=True)
-        text = re.sub(r" /[\w/.-]*python3?\b", "", script.read_text())
+        finder = re.sub(r'^ETK_PY_ABS=.*$', 'ETK_PY_ABS=""', (ROOT / "scripts" / "find-python.sh").read_text(),
+                        flags=re.M)
+        (dst / "find-python.sh").write_text(finder)
+        (self.tmp / "scripts").mkdir(exist_ok=True)  # where hooks/run-guard.sh looks (../scripts)
+        (self.tmp / "scripts" / "find-python.sh").write_text(finder)
         out = dst / script.name
-        out.write_text(text)
+        out.write_text(script.read_text())
         (dst / "discover.py").write_text("")
         (dst / "etk_run.py").write_text("")
         return out
@@ -946,12 +952,40 @@ class LauncherPythonTests(unittest.TestCase):
         self.assertIn("FAKE python3.12", r.stdout)
         self.assertNotIn("FAKE python3 ", r.stdout)
 
+    def test_etk_python_wins_and_a_version_manager_folder_is_found(self):
+        self.fake_python("python3", version_ok=False)
+        script = self.without_absolute_pythons(ROOT / "scripts" / "etk.sh")
+        home = self.tmp / "home"
+        found = home / ".pyenv" / "versions" / "3.12.8" / "bin"
+        found.mkdir(parents=True)
+        (found / "python3").write_text("#!/bin/sh\n[ \"$1\" = -c ] && exit 0\necho FAKE pyenv-3.12.8 \"$@\"\n")
+        (found / "python3").chmod(0o755)
+        old = home / ".pyenv" / "versions" / "3.8.0" / "bin"
+        old.mkdir(parents=True)
+        (old / "python3").write_text("#!/bin/sh\n[ \"$1\" = -c ] && exit 1\n")
+        (old / "python3").chmod(0o755)
+        env = {"PATH": str(self.bin), "HOME": str(home)}
+        r = subprocess.run(["/bin/sh", str(script), "run", "latest"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertIn("FAKE pyenv-3.12.8", r.stdout, r.stderr)
+        mine = self.tmp / "mine"
+        mine.write_text("#!/bin/sh\n[ \"$1\" = -c ] && exit 0\necho FAKE mine \"$@\"\n")
+        mine.chmod(0o755)
+        r = subprocess.run(["/bin/sh", str(script), "run", "latest"], env=dict(env, ETK_PYTHON=str(mine)),
+                           capture_output=True, text=True, timeout=30)
+        self.assertIn("FAKE mine", r.stdout, r.stderr)
+        # a wrong ETK_PYTHON is skipped, not trusted
+        r = subprocess.run(["/bin/sh", str(script), "run", "latest"], env=dict(env, ETK_PYTHON="/nonexistent/py"),
+                           capture_output=True, text=True, timeout=30)
+        self.assertIn("FAKE pyenv-3.12.8", r.stdout, r.stderr)
+
     def test_etk_launcher_names_the_requirement_when_none_qualifies(self):
         self.fake_python("python3", version_ok=False)
         self.fake_python("python", version_ok=False)
         r = self.run_launcher(self.without_absolute_pythons(ROOT / "scripts" / "etk.sh"), "run", "latest")
         self.assertEqual(r.returncode, 127)
         self.assertIn("Python 3.12+ not found", r.stderr)
+        self.assertIn("ETK_PYTHON", r.stderr)
+        self.assertIn("uv python install 3.12", r.stderr)
 
     def test_guard_wrapper_uses_a_3_12_python(self):
         self.fake_python("python3", version_ok=False)

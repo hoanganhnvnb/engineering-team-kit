@@ -22,10 +22,12 @@ trap 'rm -r -- "$tmp"' EXIT INT TERM
   cp -p "$root/$f" "$tmp/$f"
 done
 
-patched=0
-for py in python3 python3.13 python3.12 /usr/bin/python3 /usr/local/bin/python3 /opt/homebrew/bin/python3 python; do
-  if "$py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1; then
-    "$py" - "$tmp" <<'EOF'
+. "$root/scripts/find-python.sh"
+if ! etk_find_python; then
+  echo "evals/run.sh: $(etk_python_hint) The skill snapshot lines cannot be patched without it." >&2
+  exit 1
+fi
+"$ETK_PY" - "$tmp" <<'EOF'
 import re, sys
 from pathlib import Path
 skills = list(Path(sys.argv[1], "skills").glob("*/SKILL.md"))
@@ -40,14 +42,6 @@ if not skills or done != len(skills):
     sys.exit(f"evals/run.sh: rewrote the snapshot line in {done} of {len(skills)} skills; "
              "the eval would fail at turn 0 for the rest")
 EOF
-    patched=1
-    break
-  fi
-done
-if [ "$patched" != 1 ]; then
-  echo "evals/run.sh: Python 3.12+ not found; the skill snapshot lines cannot be patched" >&2
-  exit 1
-fi
 
 case " $* " in
   *" --threshold"*) ;;
