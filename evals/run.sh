@@ -23,8 +23,8 @@ trap 'rm -r -- "$tmp"' EXIT INT TERM
 done
 
 patched=0
-for py in python3 /usr/bin/python3 /usr/local/bin/python3 python; do
-  if "$py" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+for py in python3 python3.13 python3.12 /usr/bin/python3 /usr/local/bin/python3 /opt/homebrew/bin/python3 python; do
+  if "$py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1; then
     "$py" - "$tmp" <<'EOF'
 import re, sys
 from pathlib import Path
@@ -45,7 +45,7 @@ EOF
   fi
 done
 if [ "$patched" != 1 ]; then
-  echo "evals/run.sh: no working Python 3.8+ found; the skill snapshot lines cannot be patched" >&2
+  echo "evals/run.sh: Python 3.12+ not found; the skill snapshot lines cannot be patched" >&2
   exit 1
 fi
 

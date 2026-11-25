@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -849,3 +850,69 @@ class EvalRunTests(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("rewrote the snapshot line in 0 of 1 skills", r.stderr)
         self.assertNotIn("claude plugin eval", r.stdout)
+
+
+class LauncherPythonTests(unittest.TestCase):
+    """The launchers pick the first Python that runs and is 3.12+, and say so when none is."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        for tool in ("dirname", "cat"):
+            (self.bin / tool).symlink_to(next(Path(d) / tool for d in ("/usr/bin", "/bin") if (Path(d) / tool).exists()))
+
+    def fake_python(self, name, version_ok):
+        """Answers the launcher's version probe (`-c`), otherwise reports which fake ran the script."""
+        (self.bin / name).write_text(
+            "#!/bin/sh\n"
+            f'if [ "$1" = "-c" ]; then exit {0 if version_ok else 1}; fi\n'
+            f'echo "FAKE {name} $*"\n')
+        (self.bin / name).chmod(0o755)
+
+    def without_absolute_pythons(self, script):
+        """Copy a launcher with the absolute-path candidates removed so the host's own Python can't be found."""
+        dst = self.tmp / "copy"
+        dst.mkdir(exist_ok=True)
+        text = re.sub(r" /[\w/.-]*python3?\b", "", script.read_text())
+        out = dst / script.name
+        out.write_text(text)
+        (dst / "discover.py").write_text("")
+        (dst / "etk_run.py").write_text("")
+        return out
+
+    def run_launcher(self, script, *args, stdin=None):
+        env = {"PATH": str(self.bin)}
+        return subprocess.run(["/bin/sh", str(script), *args], input=stdin, env=env, capture_output=True, text=True, timeout=30)
+
+    def test_etk_launcher_skips_old_python_and_uses_the_first_3_12(self):
+        self.fake_python("python3", version_ok=False)
+        self.fake_python("python3.12", version_ok=True)
+        r = self.run_launcher(self.without_absolute_pythons(ROOT / "scripts" / "etk.sh"), "run", "latest")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("FAKE python3.12", r.stdout)
+        self.assertNotIn("FAKE python3 ", r.stdout)
+
+    def test_etk_launcher_names_the_requirement_when_none_qualifies(self):
+        self.fake_python("python3", version_ok=False)
+        self.fake_python("python", version_ok=False)
+        r = self.run_launcher(self.without_absolute_pythons(ROOT / "scripts" / "etk.sh"), "run", "latest")
+        self.assertEqual(r.returncode, 127)
+        self.assertIn("Python 3.12+ not found", r.stderr)
+
+    def test_guard_wrapper_uses_a_3_12_python(self):
+        self.fake_python("python3", version_ok=False)
+        self.fake_python("python3.13", version_ok=True)
+        r = self.run_launcher(self.without_absolute_pythons(ROOT / "hooks" / "run-guard.sh"),
+                              stdin='{"agent_type":"engineering-team:developer"}')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("FAKE python3.13", r.stdout)
+
+    def test_guard_wrapper_without_3_12_keeps_failing_open_and_says_why(self):
+        self.fake_python("python3", version_ok=False)
+        r = self.run_launcher(self.without_absolute_pythons(ROOT / "hooks" / "run-guard.sh"),
+                              stdin='{"agent_type":"engineering-team:developer"}')
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("Python 3.12+ not found; guard inactive", r.stderr)

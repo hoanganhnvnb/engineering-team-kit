@@ -6,8 +6,8 @@ case "$input" in
   *'"agent_type"'*'engineering-team:'*) ;;
   *) exit 0 ;;
 esac
-for py in python3 /usr/bin/python3 /usr/local/bin/python3 python; do
-  if "$py" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+for py in python3 python3.13 python3.12 /usr/bin/python3 /usr/local/bin/python3 /opt/homebrew/bin/python3 python; do
+  if "$py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1; then
     printf '%s' "$input" | "$py" "$(dirname "$0")/guard.py"
     rc=$?
     case $rc in
@@ -17,5 +17,5 @@ for py in python3 /usr/bin/python3 /usr/local/bin/python3 python; do
     exit 2
   fi
 done
-echo "[engineering-team guard] python not found; guard inactive for this call" >&2
+echo "[engineering-team guard] Python 3.12+ not found; guard inactive for this call" >&2
 exit 0
