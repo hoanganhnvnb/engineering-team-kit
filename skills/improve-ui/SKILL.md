@@ -47,9 +47,9 @@ evidence before and after.
    even when the change is only markup/styles. Loop per
    `${CLAUDE_PLUGIN_ROOT}/workflows/review-loop.md` (max 3 cycles).
 7. **Tests.** Run the project's tests/lint/typecheck (G3/G4), preferably through
-   `etk.sh exec G3 --type test -- <cmd>`. Visual changes still break snapshot and component tests.
+   `etk.sh exec G3 --type test --run <run dir> -- <cmd>`. Visual changes still break snapshot and component tests.
 8. **Gates + report.** G5 `PASS` needs browser evidence from this session. Static review
-   alone is `BLOCKED` with the reason. `etk_run.py check`, then report before → after per
+   alone is `BLOCKED` with the reason. `etk.sh run check <run dir>`, then report before → after per
    AC, with what was seen at which width.
 
 Never describe how something looks unless a browser tool showed it in this session.

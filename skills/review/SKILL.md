@@ -44,9 +44,9 @@ their findings are real before they reach the user.
    browser actually ran). Everything else stays `NOT_RUN`. Outcome: `COMPLETE` means the
    review is done and nothing critical/high is open; open medium and low findings are fine
    as long as they are in the report. `INCOMPLETE` means changes are requested (open
-   critical/high findings). Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run check` and
+   critical/high findings). Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run check <run dir>` (the directory `run init` printed) and
    fix the ledger until it passes before you report.
-7. **Report:** verdict, findings table sorted by severity (from `etk_run.py render`), what
+7. **Report:** verdict, findings table sorted by severity (from `etk.sh run render <run dir>`), what
    was and wasn't checked, and the hardening proposals (which check would stop each class
    of problem next time). Use the user's language.
 

@@ -53,8 +53,9 @@ how to trigger it) and stop.
    caught this class of bug, and put the proposal in the report (see
    `${CLAUDE_PLUGIN_ROOT}/quality/hardening.md`). Don't add it unasked.
 9. **Gates + report:** fill G1–G6 (`${CLAUDE_PLUGIN_ROOT}/quality/gates.md`; record test
-   commands with `etk.sh exec G3 --type test -- <cmd>` where you can), run
-   `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run check`, report with
+   commands with `etk.sh exec G3 --type test --run <run dir> -- <cmd>` where you can), run
+   `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run check <run dir>` (the directory `run init`
+   printed), report with
    `${CLAUDE_PLUGIN_ROOT}/quality/report-template.md`. Include the root cause in one or
    two sentences and the reproduction test name.
 

@@ -62,6 +62,7 @@ COMMAND_TYPES = {"test", "lint", "typecheck", "build", "runtime", "e2e", "static
 HARDENING_LAYERS = {"architecture", "static", "runtime", "prose", "none"}
 RUNTIME_TYPES = {"runtime", "e2e"}
 NEEDS_RUNTIME = {"build", "fix", "improve-ui"}
+RUN_NAME = re.compile(r"^(\d{8}-\d{6})-")
 
 
 def git_root() -> Path:
@@ -76,6 +77,52 @@ def git_root() -> Path:
 
 def runs_dir() -> Path:
     return git_root() / ".etk" / "runs"
+
+
+def refuse(msg: str):
+    print(f"etk_run: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def tracked_under_etk(root: Path) -> set[str]:
+    """Paths under .etk/ that git tracks. A committed ledger is someone else's claim, not this session's."""
+    try:
+        out = subprocess.run(["git", "-c", "core.fsmonitor=false", "--no-optional-locks", "ls-files", "-z", "--", ".etk"],
+                             cwd=root, capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if out.returncode != 0:
+        return set()
+    return {x for x in out.stdout.decode("utf-8", "surrogateescape").split("\0") if x}
+
+
+def symlink_problem(root: Path) -> str | None:
+    for d in (root / ".etk", root / ".etk" / "runs"):
+        if d.is_symlink():
+            return f"{d} is a symlink; run ledgers must live in a real directory inside the repository"
+        if d.exists() and not d.is_dir():
+            return f"{d} is not a directory"
+    return None
+
+
+def runs_area_problem(root: Path) -> str | None:
+    """Why `.etk/runs` can't be trusted to hold this session's ledgers, or None."""
+    problem = symlink_problem(root)
+    if problem:
+        return problem
+    tracked = sorted(tracked_under_etk(root))
+    if tracked:
+        return (f"git tracks {len(tracked)} file(s) under .etk/ (e.g. {tracked[0]}); run ledgers must stay "
+                "local. Untrack them (`git rm -r --cached .etk`) and retry")
+    return None
+
+
+def is_tracked(path: Path, root: Path, tracked: set[str]) -> bool:
+    try:
+        rel = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return False
+    return any(t == rel or t.startswith(rel + "/") for t in tracked)
 
 
 def exclude_from_git(root: Path) -> None:
@@ -113,6 +160,9 @@ def project_config(root: Path) -> dict:
 
 def cmd_init(a) -> int:
     root = git_root()
+    problem = runs_area_problem(root)
+    if problem:
+        refuse(f"init refused: {problem}")
     if a.max_cycles is None:
         a.max_cycles = project_config(root).get("max_cycles", 3)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -146,19 +196,52 @@ def cmd_init(a) -> int:
 
 
 def resolve(path: str | None) -> Path:
+    root = git_root()
     if not path:
+        problem = runs_area_problem(root)
+        if problem:
+            refuse(f"cannot pick the newest run: {problem}")
         latest = latest_run()
         if not latest:
             sys.exit("no ETK run found; run `etk_run.py init` first")
         return latest / "gates.json"
     p = Path(path)
-    return p / "gates.json" if p.is_dir() else p
+    p = p / "gates.json" if p.is_dir() else p
+    problem = symlink_problem(root)
+    if problem:
+        refuse(problem)
+    rd = (root / ".etk" / "runs").resolve()
+    real = p.resolve()
+    if not real.is_relative_to(rd) or len(real.relative_to(rd).parts) < 2:  # <run>/gates.json at least
+        refuse(f"{path} is not inside this repository's run directory {rd}")
+    if is_tracked(real, root, tracked_under_etk(root)):
+        refuse(f"{path} is tracked by git; a committed ledger is not this session's run")
+    return p
 
 
 def latest_run() -> Path | None:
+    """Newest run this session could have created: a real, untracked, not future-dated run dir."""
     d = runs_dir()
-    runs = sorted(x for x in d.iterdir() if (x / "gates.json").exists()) if d.exists() else []
-    return runs[-1] if runs else None
+    if not d.is_dir() or d.is_symlink():
+        return None
+    root = git_root()
+    tracked = tracked_under_etk(root)
+    limit = dt.datetime.now() + dt.timedelta(days=1)
+    runs = []
+    for x in d.iterdir():
+        m = RUN_NAME.match(x.name)
+        g = x / "gates.json"
+        if not m or x.is_symlink() or not x.is_dir() or g.is_symlink() or not g.is_file():
+            continue
+        try:
+            if dt.datetime.strptime(m.group(1), "%Y%m%d-%H%M%S") > limit:
+                continue
+        except ValueError:
+            continue
+        if is_tracked(x, root, tracked):
+            continue
+        runs.append(x)
+    return max(runs, default=None)
 
 
 def has_runtime_evidence(ledger: dict) -> bool:
@@ -430,6 +513,14 @@ def cmd_render(a) -> int:
     return 0
 
 
+def cmd_latest(a) -> int:
+    problem = runs_area_problem(git_root())
+    if problem:
+        refuse(f"cannot pick the newest run: {problem}")
+    print(latest_run() or "")
+    return 0
+
+
 def clean_run(led: dict) -> dict:
     """Keep only well-typed fields so one hand-edited ledger can't break the aggregate."""
     text = lambda v: v if isinstance(v, str) else None
@@ -444,8 +535,15 @@ def clean_run(led: dict) -> dict:
 
 
 def cmd_stats(a) -> int:
+    root = git_root()
+    problem = symlink_problem(root)
+    if problem:
+        refuse(problem)
     d = runs_dir()
-    paths = sorted(d.glob("*/gates.json")) if d.exists() else []
+    tracked = tracked_under_etk(root)
+    paths = sorted(x for x in d.glob("*/gates.json")
+                   if not x.parent.is_symlink() and not x.is_symlink() and not is_tracked(x, root, tracked)) \
+        if d.exists() else []
     if a.last is not None:
         if a.last < 1:
             print("--last must be >= 1", file=sys.stderr)
@@ -551,7 +649,7 @@ def main() -> int:
     st.add_argument("--last", type=int, default=None, metavar="N")
     st.set_defaults(fn=cmd_stats)
     l = sub.add_parser("latest")
-    l.set_defaults(fn=lambda a: print(latest_run() or "") or 0)
+    l.set_defaults(fn=cmd_latest)
     argv = sys.argv[1:]
     cmd: list[str] = []
     if argv[:1] == ["exec"] and "--" in argv:  # everything after `--` is the command, untouched by argparse

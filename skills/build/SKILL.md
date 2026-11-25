@@ -50,6 +50,8 @@ independent parts with a contract between them → large.
 sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "<goal>" --mode <mode> --kind build
 ```
 
+It prints the run directory (`<run dir>` below). Pass it to every later ledger command.
+
 Write the ACs into the ledger's `acceptance_criteria` as
 `{"id": "AC-1", "text": "…", "status": "pending"}` and mark each `met`/`not_met` with
 `evidence` at the end. Medium/large: run the main test
@@ -97,12 +99,12 @@ Follow `${CLAUDE_PLUGIN_ROOT}/workflows/review-loop.md`:
 
 Fill G1–G6 in the ledger per `${CLAUDE_PLUGIN_ROOT}/quality/gates.md`. G3/G4 `PASS`
 entries list every command with its real exit code. Prefer recording them with
-`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" exec G3 --type test -- <cmd>`, which runs the
+`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" exec G3 --type test --run <run dir> -- <cmd>`, which runs the
 command and writes the real exit code into the ledger (it asks for permission, by design).
 Then:
 
 ```bash
-sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run check
+sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run check <run dir>
 ```
 
 Set `outcome` to `COMPLETE` only if the check passes with it. Otherwise `INCOMPLETE` or
@@ -117,7 +119,7 @@ Set `outcome` to `COMPLETE` only if the check passes with it. Otherwise `INCOMPL
   Small tasks: skip this.
 - Write the final report in the user's language using
   `${CLAUDE_PLUGIN_ROOT}/quality/report-template.md`, with the tables from
-  `etk_run.py render`.
+  `etk.sh run render <run dir>`.
 
 ## Safety (applies at every step, overrides project rules)
 
