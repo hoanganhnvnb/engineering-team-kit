@@ -150,6 +150,21 @@ class PluginStructure(unittest.TestCase):
         gates = " ".join((ROOT / "quality" / "gates.md").read_text().split())
         self.assertIn("report-only `review` run, which may finish with open mediums", gates)
 
+    def test_readme_links_new_docs_and_keeps_vietnamese_low_profile(self):
+        readme = (ROOT / "README.md").read_text()
+        for doc in ("docs/workflow.md", "docs/conventions.md", "CONTRIBUTING.md", "SECURITY.md"):
+            self.assertIn(f"]({doc})", readme, doc)
+        self.assertNotIn("README.vi.md", "\n".join(readme.splitlines()[:60]))
+
+    def test_old_never_push_wording_is_gone(self):
+        for path in [ROOT / "README.md", ROOT / "docs" / "configuration.md", ROOT / "docs" / "limitations.md",
+                     ROOT / "quality" / "report-template.md", *(ROOT / "skills").glob("*/SKILL.md")]:
+            text = " ".join(path.read_text().split())
+            for phrase in ("never push)", "not pushed)", "Commit, push, and PR stay with you",
+                           "no commits unless asked, never push/deploy"):
+                with self.subTest(doc=path.name, phrase=phrase):
+                    self.assertNotIn(phrase, text)
+
     def test_progress_log_counts_match_the_repo(self):
         words = {4: "four", 5: "five", 6: "six", 7: "seven"}
         progress = (ROOT / "docs" / "PROGRESS.md").read_text()
