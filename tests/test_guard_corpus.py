@@ -912,8 +912,38 @@ PROTECTED = (
     ]]
 )
 
+# R1-15: quoted text and heredoc bodies are data; live substitutions and shell input are code.
+QUOTING = (
+    [("dev", c, "allow") for c in [
+        "echo '$(git push)'",
+        "echo '`git push`'",
+        "git commit -m 'run $(git push) later'",
+        "cat > notes.md <<EOF\nnpm publish\ngit push\nEOF",
+        "cat <<'EOF'\n$(git push)\nEOF",
+        "cat > a.md <<'EOF'\nkubectl apply -f x\nEOF",
+        "grep -rn 'npm publish' docs/",
+        "echo \"it's $(date)\"",
+        "tee /tmp/a < x",
+        "cat <<< 'git push'",
+    ]]
+    + [("dev", c, "block") for c in [
+        "echo \"$(git push)\"",
+        "echo `git push`",
+        "x=$(git push)",
+        "cat <<EOF\n$(git push)\nEOF",
+        "cat <<EOF\n`git push`\nEOF",
+        "bash <<EOF\ngit push\nEOF",
+        "bash <<'EOF'\ngit push\nEOF",
+        "sh <<-EOF\n\tgit push\n\tEOF",
+        "bash -c \"$(git push)\"",
+        "echo \"it's $(git push)\"",
+    ]]
+    + [("rev", "cat <<EOF > src/a.js\nx\nEOF", "block"), ("rev", "cat <<EOF > /tmp/etk.txt\nx\nEOF", "allow"),
+       ("rev", "tee /tmp/a < x", "allow"), ("rev", "echo '$(rm src/a.js)'", "allow")]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING)
 
 
 def make_project(base: Path) -> Path:

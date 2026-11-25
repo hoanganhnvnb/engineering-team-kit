@@ -12,8 +12,9 @@ message mentioning `rebase` is fine, while `git -C . push` is not. A `cd`/`pushd
 the same command moves the directory later segments are judged in; when the target can't
 be known (`cd $X`, `cd -`) relative paths are judged as if they were outside the project.
 Nested shells
-(`bash -c`, `eval`, `$(...)`, backticks) are checked recursively, and heredoc
-bodies are checked line by line like any other command text (fail closed). Shell
+(`bash -c`, `eval`, `$(...)`, backticks outside single quotes) are checked recursively. A
+heredoc or here-string is text unless it feeds a shell; an unquoted heredoc still runs
+the `$(...)` inside it. Shell
 keywords (`then`, `do`, `{`, `!`), wrappers (`timeout`, `nice`, `sudo -u x`) and
 `find -exec/-delete` are seen through; a shell reading commands from a pipe can't be
 checked and is blocked.
@@ -119,23 +120,6 @@ def is_secret(path: str) -> bool:
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 MAX_DEPTH = 4
 UNSET: Any = object()  # "not given", as opposed to None (= directory unknown)
-
-
-def substitutions(cmd: str) -> list[str]:
-    """Bodies of $(...) and `...` so they get checked as commands too."""
-    out = re.findall(r"`([^`]*)`", cmd)
-    i = 0
-    while True:
-        start = cmd.find("$(", i)
-        if start < 0:
-            break
-        depth, j = 1, start + 2
-        while j < len(cmd) and depth:
-            depth += {"(": 1, ")": -1}.get(cmd[j], 0)
-            j += 1
-        out.append(cmd[start + 2:j - 1])
-        i = start + 2
-    return out
 
 
 class Quoted(str):
@@ -1046,7 +1030,7 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
         elif mode == "stdin":
             if seg is None or not (seg.heredocs or seg.herestrings):
                 raise Blocked(f"`{prog}` reading commands from stdin can't be checked; pass a script file or use -c")
-            for text in seg.herestrings:
+            for text in seg.herestrings + [body for body, _ in seg.heredocs]:
                 check_bash(text, root, role, depth + 1, cur)
     if prog == "find":
         check_find(words[1:], root, role, depth, cur)
@@ -1252,8 +1236,6 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         raise Blocked("command nests shells too deeply to check")
     if cur is UNSET:
         cur = root
-    for inner in substitutions(cmd):
-        check_bash(inner, root, role, depth + 1, cur)
     events = parse(cmd)
     read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
     if (read_only or role == "qa-engineer") and WRITE_CODE.search(cmd) and any(runs_inline_code(program(e.words)) for e in events if isinstance(e, Seg)):
@@ -1276,8 +1258,10 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             cur = None
         for body in seg.subs:
             check_bash(body, root, role, depth + 1, cur)
-        for body, _ in seg.heredocs:
-            check_bash(body, root, role, depth + 1, cur)
+        for body, expands in seg.heredocs:
+            if expands:  # an unquoted heredoc still runs $(...) and backticks; the rest is text
+                for inner in find_subs(body):
+                    check_bash(inner, root, role, depth + 1, cur)
         words, outputs = program_ex(seg.words)
         in_pipe = seg.sep in {"|", "|&"} or seg.after in {"|", "|&", "&"}
         bg_reset = pending and seg.after == "&"  # a backgrounded list runs in a subshell
