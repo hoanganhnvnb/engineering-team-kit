@@ -61,7 +61,10 @@ INLINE_FLAG = re.compile(r"^(-[a-zA-Z]*[ceEpr]|--eval|--print|-)$")
 PERL_INPLACE = re.compile(r"^-[pnlawsTtWXU0-9]*i")  # only switches that take no argument may precede i
 FORMATTER_WRITE = {("prettier", "-w"), ("gofmt", "-w"), ("rubocop", "-a"), ("rubocop", "-A"), ("standardrb", "--fix"),
                    ("sed", "--in-place"), ("black", None), ("ruff", "format"), ("isort", None), ("rustfmt", None),
-                   ("clang-format", "-i"), ("php-cs-fixer", "fix")}
+                   ("clang-format", "-i"), ("php-cs-fixer", "fix"), ("go", "fmt"), ("cargo", "fmt"), ("deno", "fmt"),
+                   ("terraform", "fmt"), ("dprint", "fmt"), ("shfmt", "-w"), ("gofumpt", "-w"), ("goimports", "-w"),
+                   ("autopep8", "--in-place"), ("autopep8", "-i"), ("yapf", "-i"), ("yapf", "--in-place"),
+                   ("stylua", None), ("swiftformat", None)}
 
 SECRET_NAME = re.compile(
     r"(^|/)(\.env(\.[\w-]+)?|id_rsa|id_ed25519|[^/]*\.pem|[^/]*\.p12|[^/]*\.key|credentials\.json"
@@ -774,9 +777,12 @@ def writes_existing(target: str, root: str, cur: str | None) -> bool:
 
 
 def real_tool(words: list[str]) -> list[str]:
-    """See through package-runner wrappers: `npx prettier -w` is prettier."""
+    """See through package-runner wrappers: `npx prettier -w` is prettier, `python -m black` is black."""
     prog = os.path.basename(words[0]) if words else ""
     rest = words[1:]
+    if re.match(r"^python[\d.]*$", prog) and "-m" in rest and rest.index("-m") + 1 < len(rest):
+        k = rest.index("-m")
+        return rest[k + 1:]
     if prog in {"pnpm", "yarn", "npm"} and rest and rest[0] in {"exec", "dlx", "x"}:
         rest = rest[1:]
     elif prog not in {"npx", "bunx", "pnpx"}:
@@ -1005,12 +1011,123 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
         tool = os.path.basename(rest[0]) if prog in {"npx", "pnpx", "bunx", "pnpm", "yarn", "uvx", "pipx"} and rest else prog
         inplace = (prog == "sed" and any(w.startswith("-i") or w.startswith("--in-place") for w in words[1:])) \
             or (re.match(r"^(perl|ruby)[\d.]*$", prog) and any(PERL_INPLACE.match(w) for w in words[1:])) \
-            or any(w in {"--write", "--fix"} or w.startswith(("--write=", "--fix=")) for w in words[1:]) \
+            or any(w in {"--write", "--fix", "--apply", "--apply-unsafe"} or w.startswith(("--write=", "--fix="))
+                   for w in words[1:]) \
             or (any(tool == name and (flag is None or flag in words[1:]) for name, flag in FORMATTER_WRITE)
-                and not any(w in {"--check", "--diff", "--check-only", "-l", "--list-different"} for w in words[1:]))
-        if writes or inplace \
-                or (prog == "git" and any(w in {"add", "commit", "apply", "mv", "rm", "checkout", "restore"} for w in words[1:3])):
-            raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
+                and not any(w in {"--check", "-check", "--diff", "--check-only", "-l", "--list-different"}
+                            for w in words[1:]))
+        extra = read_only_extra_reason(words, root, cur)
+        if writes or inplace or extra:
+            raise Blocked(f"{role} is read-only; it reports findings and the developer changes files"
+                          + (f" ({extra})" if extra else ""))
+
+
+GIT_READ = {"diff", "log", "show", "status", "grep", "blame", "rev-parse", "ls-files", "ls-tree", "merge-base",
+            "rev-list", "shortlog", "describe", "cat-file", "show-ref", "for-each-ref", "name-rev", "diff-tree",
+            "diff-files", "diff-index", "count-objects", "check-ignore", "ls-remote", "version", "help",
+            "whatchanged", "show-branch", "range-diff", "cherry", "verify-commit", "verify-tag"}
+LIST_FLAGS = {"-a", "-r", "-v", "-vv", "-l", "--list", "--show-current", "--all", "--remotes", "--verbose", "-n", "-i",
+              "--contains", "--no-contains", "--merged", "--no-merged", "--sort", "--format", "--points-at",
+              "--column", "--no-column", "--color", "--no-color", "--ignore-case"}
+INSTALL_SUBS = {
+    "npm": {"install", "i", "ci", "add", "remove", "rm", "uninstall", "update", "upgrade", "link", "unlink", "dedupe",
+            "prune", "rebuild", "init", "version", "patch", "install-test"},
+    "pip": {"install", "uninstall", "download"}, "poetry": {"add", "install", "remove", "update", "lock", "init"},
+    "uv": {"add", "sync", "remove", "lock", "init", "venv"}, "bundle": {"install", "update", "add", "remove"},
+    "composer": {"install", "update", "require", "remove"}, "cargo": {"install", "add", "remove", "update", "fix"},
+    "go": {"get", "install", "generate"}, "gem": {"install", "uninstall", "update"},
+    "brew": {"install", "uninstall", "remove", "upgrade", "update"},
+    "apt": {"install", "remove", "upgrade", "update", "purge"}, "apk": {"add", "del", "upgrade", "update"},
+}
+for _alias, _base in {"pnpm": "npm", "yarn": "npm", "bun": "npm", "pip3": "pip", "apt-get": "apt", "dnf": "apt",
+                      "yum": "apt"}.items():
+    INSTALL_SUBS[_alias] = INSTALL_SUBS[_base]
+
+
+def git_read_only_reason(args: list[str]) -> str | None:
+    """Why this git command isn't read-only, or None. Subcommands outside an allowlist are refused."""
+    i, globs = 0, []
+    while i < len(args) and args[i].startswith("-"):
+        globs.append(args[i])
+        i += 2 if args[i] in GIT_GLOBAL_WITH_ARG else 1
+    if any(g in {"-c", "--config-env"} or g.startswith(("-c", "--config-env=")) and g != "-C" for g in globs):
+        return "`git -c` can run arbitrary commands through aliases and config"
+    if i >= len(args):
+        return None
+    sub, rest = args[i], args[i + 1:]
+    if any(a == "--output" or a.startswith("--output=") for a in rest):
+        return f"`git {sub} --output` writes a file"
+    if sub in GIT_READ:
+        return None
+    if sub == "branch" and all(a in LIST_FLAGS or not a.startswith("-") for a in rest) \
+            and (not [a for a in rest if not a.startswith("-")] or set(rest) & {"-l", "--list", "--contains", "--merged",
+                                                                                "--no-merged", "--points-at"}):
+        return None
+    if sub == "tag" and all(a in LIST_FLAGS for a in rest):
+        return None
+    if sub == "remote" and rest[:1] in ([], ["-v"], ["-vv"], ["show"], ["get-url"]):
+        return None
+    if sub == "worktree" and rest[:1] == ["list"]:
+        return None
+    if sub == "stash" and rest[:1] in (["list"], ["show"]):
+        return None
+    if sub == "reflog" and rest[:1] in ([], ["show"], ["exists"]):
+        return None
+    if sub == "submodule" and rest[:1] in ([], ["status"], ["summary"]):
+        return None
+    if sub == "config" and set(rest) & {"--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin"} \
+            and not set(rest) & {"--add", "--unset", "--unset-all", "--replace-all", "--edit", "-e"}:
+        return None
+    return f"`git {sub}` can change the repository or working tree"
+
+
+def read_only_extra_reason(words: list[str], root: str, cur: str | None) -> str | None:
+    """Mutations a read-only role must not make that the generic writer checks don't see."""
+    prog = os.path.basename(words[0])
+    args = words[1:]
+    if prog == "git":
+        return git_read_only_reason(args)
+    pos = positionals(args, PKG_OPTS)
+    if prog == "yarn" and not pos and not any(a in {"--version", "-v", "--help", "-h"} for a in args):
+        return "bare `yarn` installs dependencies"
+    if pos and pos[0] in INSTALL_SUBS.get(prog, set()):
+        return f"`{prog} {pos[0]}` installs or changes packages"
+    if prog == "go" and pos[:1] == ["mod"] and pos[1:2] and pos[1] != "graph" and pos[1] != "why":
+        return "`go mod` rewrites go.mod"
+    if prog == "uv" and pos[:2] == ["pip", "install"]:
+        return "`uv pip install` installs packages"
+    if prog in {"awk", "gawk", "mawk"} and ("inplace" in args or "-iinplace" in args):
+        return "`awk -i inplace` edits files"
+    if prog == "curl":
+        outs = []
+        for k, a in enumerate(args):
+            if a in {"-o", "--output"} or (re.match(r"^-[a-zA-Z]+$", a) and a.endswith("o")):
+                outs += args[k + 1:k + 2]  # -o FILE, or a cluster ending in o like -sSLo FILE
+            elif a.startswith("--output="):
+                outs.append(a.split("=", 1)[1])
+        if any(o != "-" and o not in SAFE_SINKS and not scratch(o, root, cur) for o in outs):
+            return "`curl -o` writes a file"
+        if any(a in {"-O", "--remote-name", "--remote-name-all", "-T", "--upload-file"}
+               or (re.match(r"^-[a-zA-Z]+$", a) and ("O" in a or "T" in a)) for a in args):
+            return "`curl -O`/`-T` writes or uploads files"
+    if prog == "wget":
+        outs = [args[k + 1] for k, a in enumerate(args) if a in {"-O", "--output-document", "-P", "--directory-prefix"}
+                and k + 1 < len(args)]
+        outs += [a.split("=", 1)[1] for a in args if a.startswith(("--output-document=", "--directory-prefix="))]
+        if "--spider" not in args and (not outs or any(
+                o != "-" and o not in SAFE_SINKS and not scratch(o, root, cur) for o in outs)):
+            return "`wget` saves files"
+    if prog in {"tar", "bsdtar"}:
+        first = args[0] if args else ""
+        modes = set(first.lstrip("-")) if first and not first.startswith("--") else set()
+        if modes & set("xcruA") or any(a in {"--extract", "--get", "--create", "--append", "--update", "--delete"}
+                                       for a in args):
+            return "`tar` extracts or creates archives"
+    if prog == "unzip" and not any(a in {"-l", "-p", "-t", "-Z", "-v"} for a in args):
+        d = [args[k + 1] for k, a in enumerate(args) if a == "-d" and k + 1 < len(args)]
+        if not d or any(not scratch(x, root, cur) for x in d):
+            return "`unzip` extracts files"
+    return None
 
 
 def files_created(seg: Seg) -> list[str]:
