@@ -96,6 +96,23 @@ class IdentityTests(Base):
         self.assertEqual(etk_profile.redact_remote("git@github.com:o/r.git"), "git@github.com:o/r.git")
         self.assertEqual(etk_profile.redact_remote("ssh://git:pw@h.com/o/r"), "ssh://h.com/o/r")
 
+    def test_query_and_fragment_never_kept(self):
+        url = "https://github.com/o/r.git?access_token=SECRET#frag"
+        self.assertEqual(etk_profile.redact_remote(url), "https://github.com/o/r.git")
+        self.assertEqual(etk_profile.redact_remote("git@github.com:o/r.git?x=SECRET"), "git@github.com:o/r.git")
+        self.assertEqual(etk_profile.normalize_remote(url), "github.com/o/r")
+        d = self.repo("q", url)
+        plain = self.repo("plain", "https://github.com/o/r.git")
+        self.assertEqual(self.detect(d)["key"], self.detect(plain)["key"])
+        self.ok(d, "set", "commit.style", "project")
+        for args in (("detect",), ("show",), ("show", "--brief")):
+            self.assertNotIn("SECRET", self.ok(d, *args))
+
+    def test_invisible_and_bidi_characters_are_stripped(self):
+        evil = "a\u202eb\u200bc\u2066d\x85e\x9bf\u200fg"
+        self.assertEqual(etk_profile.clip(evil), "a b c d e f g")
+        self.assertEqual(etk_profile.redact_remote("https://h.com/o/r\u202e.git"), "https://h.com/o/r .git")
+
     def test_hosts(self):
         cases = {"git@gitlab.com:o/r.git": "gitlab", "https://gitlab.acme.io/o/r": "gitlab",
                  "git@bitbucket.org:o/r.git": "bitbucket", "https://dev.azure.com/o/p/_git/r": "azure",
@@ -362,6 +379,66 @@ class StoreTests(Base):
         self.ok(d, "set", "deploy.none", "true")
         self.assertIn("deploy: none", self.ok(d, "show", "--brief"))
 
+    def test_profile_is_bound_to_checkout_and_push_url(self):
+        d = self.repo(remote="https://github.com/victim/prod.git")
+        for path, value in (("vcs.type", "git"), ("branches.model", "trunk"), ("release.push", "auto"),
+                            ("release.commit", "auto"), ("release.integrate", "none"), ("commit.style", "project"),
+                            ("deploy.none", "true")):
+            self.ok(d, "set", path, value)
+        self.ok(d, "confirm")
+        stored = json.loads(self.ok(d, "show", "--json"))["project"]
+        self.assertEqual((stored["root"], stored["push"]), (str(d), "https://github.com/victim/prod.git"))
+        self.assertEqual(self.ok(d, "missing"), "")
+        self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+        # repository code redirects the push: the stored `auto` values stop counting
+        self.git(d, "config", "remote.origin.pushurl", "https://user:pw@evil.example/x.git?token=SECRET")
+        lines = self.ok(d, "show", "--brief").splitlines()
+        self.assertEqual(lines[0], etk_profile.RECONFIRM)
+        self.assertLessEqual(len(lines), 5)
+        self.assertNotIn("push auto", "\n".join(lines))
+        self.assertEqual(self.ok(d, "missing").splitlines(), [etk_profile.RECONFIRM, "release.push"])
+        out = DiscoverProfileTests.discover(self, d, "--data", str(self.data))
+        self.assertIn("profile from a different checkout/remote; re-confirm", out)
+        self.ok(d, "set", "commit.style", "conventional")  # an edit doesn't re-approve the binding
+        self.assertIn(etk_profile.RECONFIRM, self.ok(d, "missing"))
+        self.ok(d, "confirm")  # the developer looked at it again here
+        self.assertEqual(self.ok(d, "missing"), "")
+        stored = json.loads(self.ok(d, "show", "--json"))["project"]
+        self.assertEqual(stored["push"], "https://evil.example/x.git")
+        # another checkout that claims the same origin finds the same file but not its `auto`s
+        other = self.repo("other", "git@github.com:victim/prod.git")
+        self.assertEqual(self.ok(other, "path"), self.ok(d, "path"))
+        self.assertEqual(self.ok(other, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+        self.assertIn("release.push", self.ok(other, "missing").splitlines())
+
+    def test_symlinks_in_the_store_are_refused(self):
+        d = self.repo()
+        path = Path(self.ok(d, "path").strip())
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        for link in (path.parent.parent, path.parent, path):
+            for p in (path, path.parent, path.parent.parent):  # reset
+                if p.is_symlink() or p.is_file():
+                    p.unlink()
+                elif p.is_dir():
+                    p.rmdir()
+            link.parent.mkdir(parents=True, exist_ok=True)
+            target = elsewhere / "profile.json" if link == path else elsewhere
+            if link == path:
+                target.write_text(json.dumps({"release": {"push": "auto"}}))
+            link.symlink_to(target)
+            for args in (("set", "commit.style", "project"), ("show",), ("missing",)):
+                with self.subTest(link=link.name, args=args):
+                    r = self.prof(d, *args)
+                    self.assertEqual(r.returncode, 2, r.stdout)
+                    self.assertIn("symlink", r.stderr)
+                    self.assertNotIn("Traceback", r.stderr)
+            self.assertFalse((elsewhere / ".profile.tmp").exists())
+            self.assertEqual(sorted(x.name for x in elsewhere.iterdir()),
+                             ["profile.json"] if link == path else [])
+            if link == path:
+                target.unlink()
+
     def test_through_etk_sh(self):
         d = self.repo()
         r = subprocess.run(["sh", str(ROOT / "scripts" / "etk.sh"), "profile", "set", "release.push", '"confirm"',
@@ -404,6 +481,37 @@ class DiscoverProfileTests(Base):
         self.assertEqual(block[0], "- git · trunk-based · project")
         self.assertIn("memory: 1 note", block[-1])
         self.assertLessEqual(len(out.splitlines()) - len(base.splitlines()), 6)
+
+    def test_profile_block_keeps_unconfirmed_visible(self):
+        d = self.repo()
+        for path, value in (("vcs.type", "git"), ("branches.model", "trunk"), ("release.push", "confirm"),
+                            ("commit.style", "project"), ("deploy.none", "true")):
+            self.ok(d, "set", path, value)
+        block = self.discover(d, "--data", str(self.data)).split("### Workflow profile\n", 1)[1].split("\n\n")[0]
+        self.assertIn("(unconfirmed)", block)
+        self.ok(d, "confirm")
+        block = self.discover(d, "--data", str(self.data)).split("### Workflow profile\n", 1)[1].split("\n\n")[0]
+        self.assertNotIn("unconfirmed", block)
+
+    def test_status_does_not_run_repository_filters(self):
+        import discover  # noqa: E402  (scripts/ is on sys.path)
+        d = self.repo()
+        (d / "a.txt").write_text("hello\n")
+        self.git(d, "add", "a.txt")
+        self.git(d, "commit", "-q", "-m", "a")
+        marker = self.tmp / "filter-ran"
+        (d / ".gitattributes").write_text("* filter=x\n")
+        self.git(d, "config", "filter.x.clean", f": > '{marker}'")
+        st = (d / "a.txt").stat()
+        os.utime(d / "a.txt", (st.st_atime, st.st_mtime + 5))  # same content, new stat: status must hash it
+        out = self.discover(d)
+        self.assertFalse(marker.exists(), "discover ran the repository's clean filter")
+        if discover.git_version(d) < (2, 40):
+            self.assertIn("uncommitted changes UNKNOWN", out)
+        else:
+            self.assertNotIn("UNKNOWN", out)
+        self.git(d, "status", "--porcelain")  # the setup really would have run it
+        self.assertTrue(marker.exists())
 
     def test_conventions_line_only_when_present(self):
         d = self.repo()
@@ -464,14 +572,16 @@ class DiscoverProfileTests(Base):
 
     def test_repo_strings_are_sanitized(self):
         d = self.repo()
-        (d / "package.json").write_text(json.dumps({"scripts": {"test`; rm -rf /`\u0007" + "x" * 200: "jest`x`"}}))
+        (d / "package.json").write_text(json.dumps({"scripts": {"test`; rm -rf /`\u0007\u202e\u2066" + "x" * 200:
+                                                                "jest`x`\u200b"}}))
         (d / ".claude").mkdir()
         (d / ".claude" / "engineering-team.json").write_text(json.dumps(
             {"rules": [{"paths": ["a/**"], "rule": "r", "check": "npm run lint`\n## injected" + "y" * 200}]}))
         out = self.discover(d)
         line = next(l for l in out.splitlines() if "npm run test" in l)
         self.assertEqual(line.count("`"), 2)
-        self.assertNotIn("\u0007", out)
+        for ch in ("\u0007", "\u202e", "\u2066", "\u200b"):
+            self.assertNotIn(ch, out)
         self.assertLess(len(line), 200)
         self.assertNotIn("\n## injected", out)
         rule = next(l for l in out.splitlines() if "(check:" in l)

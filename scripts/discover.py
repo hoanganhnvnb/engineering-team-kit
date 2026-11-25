@@ -8,6 +8,7 @@ facts instead of guesses. Output is markdown, kept short on purpose: it lists
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -27,6 +28,11 @@ SKIP_DIRS = {
 }
 # Read-only git: never start an fsmonitor daemon, run a hook or take an optional lock.
 GIT = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "--no-optional-locks"]
+# Hashing a work-tree file for `status` runs the clean filter that .gitattributes names. With git
+# 2.40+ the attributes can come from the empty tree instead, so no repository filter applies.
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+# The newest run date accepted; must match etk_run.latest_run (a planted future-dated run is skipped).
+FUTURE_SLACK = dt.timedelta(days=1)
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -44,6 +50,23 @@ def run_checked(cmd: list[str], cwd: Path, timeout: int = 10) -> str | None:
         return None
 
 
+def git_version(cwd: Path) -> tuple[int, ...]:
+    m = re.search(r"(\d+)\.(\d+)", run(["git", "--version"], cwd))
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+@functools.lru_cache(maxsize=None)
+def safe_git(root: Path) -> list[str] | None:
+    """The git prefix for commands that may hash work-tree files (status, ls-files), or None when
+    git is too old to ignore repository attributes and the repository configures a filter or
+    textconv program: then those commands could run repository code and are skipped."""
+    if git_version(root) >= (2, 40):
+        return [*GIT, f"--attr-source={EMPTY_TREE}"]
+    if run(GIT + ["config", "--get-regexp", r"^filter\.|textconv"], root):
+        return None
+    return list(GIT)
+
+
 def find_root(start: Path) -> Path:
     top = run(GIT + ["rev-parse", "--show-toplevel"], start)
     return Path(top) if top else start
@@ -52,7 +75,7 @@ def find_root(start: Path) -> Path:
 def git_files(root: Path) -> list[str] | None:
     """Tracked + untracked-not-ignored paths, or None when this isn't a git work tree."""
     try:
-        out = subprocess.run(GIT + ["ls-files", "-co", "--exclude-standard", "-z"], cwd=root,
+        out = subprocess.run((safe_git(root) or GIT) + ["ls-files", "-co", "--exclude-standard", "-z"], cwd=root,
                              capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -129,8 +152,9 @@ def short(s: str, n: int = 110) -> str:
 
 
 def clean(s, n: int = 80) -> str:
-    """Repository text shown inside the snapshot: no control characters or backticks, bounded length."""
-    return short(re.sub(r"[\x00-\x1f\x7f`]", " ", str(s)), n)
+    """Repository text shown inside the snapshot: no control, zero-width or bidi characters and no
+    backticks, bounded length."""
+    return short(re.sub("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069`]", " ", str(s)), n)
 
 
 def data_arg(argv: list[str]) -> str | None:
@@ -149,6 +173,7 @@ def profile_block(root: Path, raw_data: str | None) -> None:
     except etk_profile.UsageError:
         print("- profile: unknown here; run `etk.sh profile show --data <plugin data dir>`")
         return
+    unconfirmed = any(l.startswith("file: ") and l.endswith("(unconfirmed)") for l in lines)
     if missing:
         lines = [f"missing: {', '.join(missing)} → onboard (workflows/profile.md)"]
     else:
@@ -156,6 +181,8 @@ def profile_block(root: Path, raw_data: str | None) -> None:
         lines = [l for l in lines if not l.startswith(("file: ", "memory: "))][:3]
         if mem and lines:
             lines[-1] += f" · {mem[0]}"
+    if unconfirmed and lines:  # the developer never reviewed it: say so even in the short form
+        lines[-1] += " · (unconfirmed)"
     print("\n### Workflow profile")
     for line in lines:
         print(f"- {line}")
@@ -166,9 +193,9 @@ def previous_run(root: Path) -> str | None:
     etk, runs = root / ".etk", root / ".etk" / "runs"
     if etk.is_symlink() or runs.is_symlink() or not runs.is_dir():
         return None
-    out = run(GIT + ["ls-files", "-z", "--", ".etk"], root)
+    out = run((safe_git(root) or GIT) + ["ls-files", "-z", "--", ".etk"], root)
     tracked = {n.split("/")[2] for n in out.split("\0") if n.count("/") >= 2}
-    limit = dt.datetime.now() + dt.timedelta(minutes=5)
+    limit = dt.datetime.now() + FUTURE_SLACK
     best = None
     for d in sorted(runs.iterdir()):
         m = re.match(r"^(\d{8}-\d{6})", d.name)
@@ -313,10 +340,13 @@ def main() -> int:
     # Git state -- the Lead must know about uncommitted work before touching anything.
     branch = run(GIT + ["branch", "--show-current"], root)
     if branch or run(GIT + ["rev-parse", "--git-dir"], root):
-        raw = run_checked(GIT + ["status", "--porcelain"], root, timeout=30)
+        sgit = safe_git(root)
+        raw = run_checked(sgit + ["status", "--porcelain"], root, timeout=30) if sgit else None
         if raw is None:
-            print(f"- git: branch `{branch or '(detached)'}`, uncommitted changes UNKNOWN (git status failed or "
-                  "timed out). Run `git status` yourself before touching files")
+            why = "git status failed or timed out" if sgit else \
+                "skipped: the repository configures a filter/textconv program and this git can't ignore it"
+            print(f"- git: branch `{branch or '(detached)'}`, uncommitted changes UNKNOWN ({why}). "
+                  "Run `git status` yourself before touching files")
             status = []
         else:
             status = raw.splitlines()

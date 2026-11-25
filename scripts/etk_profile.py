@@ -29,6 +29,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -47,7 +48,10 @@ MAX_FACT = 300
 CONVENTIONAL = re.compile(r"^[a-z]+(\(([^)]+)\))?!?: ")
 VIETNAMESE = re.compile(r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]")
 DEPLOY_WORD = re.compile(r"deploy|release|publish|ship", re.I)
-CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+# C0/C1 controls, zero-width and bidi overrides/isolates (they can hide or reorder what's shown).
+CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069]")
+# What a profile from another checkout or push URL can no longer grant on its own.
+RECONFIRM = "profile from a different checkout/remote; re-confirm"
 
 ENUMS = {
     "vcs.type": {"git", "svn", "none"},
@@ -145,11 +149,16 @@ def split_url(url: str) -> tuple[str, str, str, str] | None:
         if scheme == "file":
             return None
         user, _, hostport = authority.rpartition("@")
-        return scheme, user, hostport, path
+        return scheme, user, hostport, _no_query(path)
     m = re.match(r"^(?:([^@/:]+)@)?([^/:]+):(?!//)(.*)$", url)
     if m and not re.match(r"^[A-Za-z]$", m.group(2)):  # `C:\repo` is a path, not a host
-        return "scp", m.group(1) or "", m.group(2), m.group(3)
+        return "scp", m.group(1) or "", m.group(2), _no_query(m.group(3))
     return None
+
+
+def _no_query(path: str) -> str:
+    """`/o/r.git?access_token=SECRET#x` -> `/o/r.git`: a query or fragment can carry credentials."""
+    return re.split(r"[?#]", path, maxsplit=1)[0]
 
 
 def redact_remote(url: str | None) -> str | None:
@@ -215,12 +224,18 @@ def svn_root(cwd: Path) -> Path | None:
 
 
 def identify(cwd: Path | None = None) -> dict:
-    """vcs type, root, raw origin URL and the profile key for the project at cwd."""
+    """vcs type, root, raw origin URL, push URL and the profile key for the project at cwd.
+
+    The key comes from git config, which anything in the repo can change, so it only finds a
+    profile; `checkout_mismatch` decides whether that profile's `auto` settings still apply here."""
     cwd = Path(os.path.realpath(cwd or Path.cwd()))
     top = git(["rev-parse", "--show-toplevel"], cwd)
+    push = None
     if top:
         root = Path(os.path.realpath(top))
         remote = git(["config", "--get", "remote.origin.url"], root) or None
+        if remote:  # what `git push origin` really uses: pushurl and pushInsteadOf applied
+            push = git(["remote", "get-url", "--push", "origin"], root) or None
         vcs = "git"
     else:
         root, remote = svn_root(cwd), None
@@ -229,7 +244,7 @@ def identify(cwd: Path | None = None) -> dict:
         if vcs == "svn" and shutil.which("svn"):
             remote = run(["svn", "info", "--non-interactive", "--show-item", "repos-root-url"], root) or None
     basis = "remote:" + normalize_remote(remote) if remote else "root:" + str(root)
-    return {"vcs": vcs, "root": str(root), "remote": remote,
+    return {"vcs": vcs, "root": str(root), "remote": remote, "push": push,
             "key": hashlib.sha256(basis.encode()).hexdigest()[:16]}
 
 
@@ -354,16 +369,41 @@ def profile_path(data: Path, ident: dict) -> Path:
     return data / "projects" / ident["key"] / "profile.json"
 
 
-def load(path: Path) -> dict:
-    """The stored profile, {} when absent. A corrupt file is moved aside to profile.json.bak."""
+def check_store(path: Path) -> None:
+    """Refuse a symlink anywhere below the data dir (`projects`, `projects/<key>`, `profile.json`):
+    the store must not read or write through a link someone planted."""
+    for p in (path.parent.parent, path.parent, path):
+        try:
+            st = os.lstat(p)
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            raise UsageError(f"can't inspect {p}: {e}")
+        if stat.S_ISLNK(st.st_mode):
+            raise UsageError(f"{p} is a symlink; the profile store must be real directories and files "
+                             "(remove the link and retry)")
+
+
+def read_bytes(path: Path) -> bytes | None:
+    """The profile file's bytes (None when absent), opened without following a final symlink."""
+    check_store(path)
     try:
-        text = path.read_text(encoding="utf-8")
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except FileNotFoundError:
-        return {}
+        return None
     except OSError as e:
         raise UsageError(f"can't read {path}: {e}")
+    with os.fdopen(fd, "rb") as f:
+        return f.read(2_000_000)
+
+
+def load(path: Path) -> dict:
+    """The stored profile, {} when absent. A corrupt file is moved aside to profile.json.bak."""
+    raw = read_bytes(path)
+    if raw is None:
+        return {}
     try:
-        prof = json.loads(text)
+        prof = json.loads(raw.decode("utf-8", errors="replace"))
     except ValueError:
         prof = None
     if isinstance(prof, dict):
@@ -379,8 +419,10 @@ def load(path: Path) -> dict:
 def save(path: Path, prof: dict, data: Path) -> None:
     if not data.exists():
         os.makedirs(data, mode=0o700, exist_ok=True)
+    check_store(path)
     for d in (path.parent.parent, path.parent):
         d.mkdir(mode=0o700, exist_ok=True)
+        check_store(path)  # nothing swapped a link in between
         os.chmod(d, 0o700)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".profile.", suffix=".tmp")
     try:
@@ -396,11 +438,45 @@ def save(path: Path, prof: dict, data: Path) -> None:
         raise
 
 
-def stamp(prof: dict, ident: dict) -> dict:
+def binding(ident: dict) -> dict:
+    """Where this profile was set up: the checkout and the URL a push really goes to."""
+    return {"remote": redact_remote(ident["remote"]), "push": redact_remote(ident.get("push")),
+            "root": ident["root"], "key": ident["key"]}
+
+
+def stamp(prof: dict, ident: dict, rebind: bool = False) -> dict:
+    """Schema and timestamps. The checkout binding is written on the first save and on `confirm`
+    (rebind) only, so an edit from another checkout doesn't quietly re-approve its `auto` values."""
     prof["schema"] = SCHEMA
-    prof["project"] = {"remote": redact_remote(ident["remote"]), "root": ident["root"], "key": ident["key"]}
+    if rebind or not isinstance(prof.get("project"), dict):
+        prof["project"] = binding(ident)
     prof["updated_at"] = now()
     return prof
+
+
+def checkout_mismatch(prof: dict, ident: dict) -> bool:
+    """True when the stored profile was set up in another checkout or for another push URL.
+
+    The key is derived from `remote.origin.url`, which repository code can rewrite to load
+    someone else's profile, so the root and push URL recorded at confirm time must still match."""
+    if not prof:
+        return False
+    proj = prof.get("project")
+    if not isinstance(proj, dict):
+        return True
+    return proj.get("root") != ident["root"] or proj.get("push") != redact_remote(ident.get("push"))
+
+
+def effective(prof: dict, ident: dict) -> dict:
+    """The profile as it may be acted on here: `release.*: auto` counts as unset after a mismatch."""
+    if not checkout_mismatch(prof, ident):
+        return prof
+    out = json.loads(json.dumps(prof))
+    rel = out.get("release")
+    if isinstance(rel, dict):
+        for k in [k for k, v in rel.items() if v == "auto"]:
+            del rel[k]
+    return out
 
 
 # ---------------------------------------------------------------- dotted paths + validation
@@ -526,11 +602,14 @@ def unset_value(prof: dict, dotted: str) -> bool:
 # ---------------------------------------------------------------- reports
 
 def missing(prof: dict, ident: dict) -> list[str]:
-    out = []
+    """Required facts still unknown. Pass the stored profile: `auto` values bound to another
+    checkout/remote are dropped here and the re-confirm line comes first."""
+    out = [RECONFIRM] if checkout_mismatch(prof, ident) else []
+    prof = effective(prof, ident)
     vcs = get(prof, "vcs.type")
     if vcs is None:
         if ident["vcs"] == "none":
-            return []  # no version control here: nothing to commit, push or integrate
+            return out  # no version control here: nothing to commit, push or integrate
         out.append("vcs.type")
         vcs = ident["vcs"]
     decided = get(prof, "deploy.none") is True or bool(get(prof, "deploy.targets"))
@@ -550,9 +629,12 @@ def missing(prof: dict, ident: dict) -> list[str]:
     return out
 
 
-def brief(prof: dict, path: Path) -> list[str]:
+def brief(prof: dict, path: Path, ident: dict | None = None) -> list[str]:
     if not prof:
         return ["no workflow profile yet"]
+    stale = ident is not None and checkout_mismatch(prof, ident)
+    if stale:
+        prof = effective(prof, ident)
     first = [str(get(prof, "vcs.type") or "vcs ?")]
     host = get(prof, "host.type")
     if host and host != "none":
@@ -598,6 +680,10 @@ def brief(prof: dict, path: Path) -> list[str]:
     if isinstance(mem, list) and mem:
         lines.append(f"memory: {len(mem)} note{'s' if len(mem) != 1 else ''}")
     lines.append(f"file: {path}" + ("" if prof.get("confirmed_at") else " (unconfirmed)"))
+    if stale:
+        lines.insert(0, RECONFIRM)
+        if len(lines) > 5:
+            lines = [l for l in lines if not l.startswith("memory: ")]
     return lines[:5]
 
 
@@ -607,7 +693,22 @@ def snapshot(raw_data: str | None, cwd: Path | None = None) -> tuple[list[str], 
     ident = identify(cwd)
     path = profile_path(data, ident)
     prof = load(path)
-    return brief(prof, path), missing(prof, ident), path
+    return brief(prof, path, ident), missing(prof, ident), path
+
+
+def load_for(raw_data: str | None, cwd: Path | None = None) -> tuple[dict, Path, bytes | None, bool]:
+    """(effective profile, path, file bytes, stale) for etk_run: what may be acted on here.
+    `stale` means the profile was set up for another checkout/remote and its `auto`s were dropped."""
+    data = data_dir(raw_data)
+    ident = identify(cwd)
+    path = profile_path(data, ident)
+    raw = read_bytes(path)
+    try:  # parse the bytes that get hashed, not a second read
+        prof = json.loads(raw.decode("utf-8", errors="replace")) if raw is not None else {}
+    except ValueError:
+        prof = {}
+    prof = prof if isinstance(prof, dict) else {}
+    return effective(prof, ident), path, raw, checkout_mismatch(prof, ident)
 
 
 # ---------------------------------------------------------------- CLI
@@ -676,7 +777,7 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "show":
             prof = load(path)
             if a.brief:
-                print("\n".join(brief(prof, path)))
+                print("\n".join(brief(prof, path, ident)))
             elif not prof:
                 print("no workflow profile yet" if not a.json else "{}")
             else:
@@ -696,7 +797,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f"{a.dotted} was not set", file=sys.stderr)
         elif a.cmd == "confirm":
-            prof = stamp(load(path), ident)
+            prof = stamp(load(path), ident, rebind=True)
             prof["confirmed_at"] = prof["updated_at"]
             save(path, prof, data)
             print(f"confirmed {path}")
