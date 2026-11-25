@@ -3,6 +3,29 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
+## 0.3.0
+
+- **Breaking: Python 3.12 or newer is required.** `etk.sh`, the guard wrapper and
+  `evals/run.sh` pick the first working Python that is 3.12+ (also trying `python3.12` and
+  `python3.13`). If there is none, the guard blocks the plugin's subagents with a message
+  instead of letting them run unguarded; the main session is not affected. CI now runs on
+  Python 3.12, on Linux and macOS.
+- The guard now reads shell commands with a real tokenizer and parser (quotes, heredocs,
+  nested shells, `cd` tracking) instead of pattern matching. New protections: `protected_paths`
+  from the project config, write-style MCP tools, read-only git for read-only roles, `.git` and
+  bulk deletes, env/sudo options that change directory. It fails closed when it hits an error.
+- The guard is a best-effort tripwire, not a sandbox. Known open items are in
+  `docs/limitations.md`: obfuscated commands, MCP tools with neutral names, files created by
+  earlier tool calls, agents mapped through the `agents` config, and the main session.
+- Ledger: new `invalid` finding status (needs a `resolution`); a report-only review can finish
+  `COMPLETE` with open mediums; `etk.sh exec <gate> --type test -- <cmd>` runs a command and records
+  its real exit code, and `check` warns about G3/G4 passes recorded any other way. `exec` is not
+  pre-approved by any skill and is only as guarded as the guard's wrapper handling.
+- Fixes: two `init` runs in the same second no longer crash; `render` copes with malformed
+  criteria and gates; the project snapshot no longer hides skills named `build` or `test`;
+  parallel reviewers get distinct finding ID prefixes; review and improve-ui wording matches the
+  routing rules; `evals/run.sh` no longer needs GNU `xargs` and fails if its patch step misses.
+
 ## 0.2.1
 
 - `evals/run.sh`: run the evals on a temporary copy so a harness sandbox problem with
