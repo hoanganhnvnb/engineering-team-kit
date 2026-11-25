@@ -435,7 +435,6 @@ CD_LATER_AND_BUILTINS = (
         "(cd src && ls); rm -rf build",
         "cd src && ls && rm -rf build",
         "trap - INT",
-        "trap 'rm -rf build' INT",
         "mapfile -t a < /tmp/f",
         "X=1 && cd src && rm -rf build",
         "export X=$(pwd); cd /tmp && rm -rf scratch",
@@ -464,8 +463,18 @@ WRAPPER_EDGES_2 = (
     + [("rev", "time -f %e -o /tmp/t npm test", "allow")]
 )
 
+# A trap handler runs later, from wherever the shell is then.
+TRAP_STRICT = (
+    [("dev", c, "block") for c in [
+        "trap 'rm -rf build' INT",
+        "trap 'echo hi' INT; cd /tmp; rm -rf scratch",
+        "trap 'echo hi' INT; cd /tmp && rm -rf scratch",
+    ]]
+    + [("dev", c, "allow") for c in ["trap 'rm -rf /tmp/etk-scratch' INT", "trap - INT", "trap 'echo bye' INT"]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT)
 
 
 def make_project(base: Path) -> Path:

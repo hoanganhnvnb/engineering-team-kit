@@ -779,7 +779,7 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
             if any(re.sub(r"^SIG", "", x.upper()) in {"DEBUG", "RETURN", "ERR", "EXIT", "0"} for x in ops[1:]):
                 raise Blocked("`trap` on EXIT/ERR/DEBUG/RETURN runs code later that can't be checked")
             if ops and ops[0] != "-":
-                check_bash(ops[0], root, role, depth + 1, cur)
+                check_bash(ops[0], root, role, depth + 1, None)  # runs later, from wherever we are then
     for script in callback_scripts(prog, words[1:]):
         check_bash(script, root, role, depth + 1, cur)
     if prog in SHELLS or prog in {"source", "."}:
@@ -839,6 +839,7 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
     groups: list = []
     pending = False  # a cd whose success we assumed; a later `;`/`||` may run where it failed
     taint = False  # something may have set CDPATH through an expansion
+    trapped = False  # a trap handler is installed: it can fire from any directory
     for seg in events:
         if seg is PUSH:
             groups.append((cur, list(dirs), pending))
@@ -847,6 +848,8 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             if groups:
                 cur, dirs, pending = groups.pop()
             continue
+        if trapped:
+            cur = None
         for body in seg.subs:
             check_bash(body, root, role, depth + 1, cur)
         for body, _ in seg.heredocs:
@@ -880,6 +883,8 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         if not in_pipe and any(os.path.basename(w) in {"cd", "pushd", "popd"} for w in words[1:]):
             cur = None  # a cd we can't attribute (find -exec cd, xargs cd): stay strict
         check_words(words, root, role, depth, cur, seg, outputs)
+        if words and os.path.basename(words[0]) == "trap" and not in_pipe:
+            trapped = True
         if words and os.path.basename(words[0]) in {"eval", "source", ".", "trap"} and not in_pipe:
             cur, dirs[:] = None, ["?"]  # whatever it did to the directory isn't visible to us
 
