@@ -411,6 +411,19 @@ class StoreTests(Base):
         self.assertEqual(self.ok(other, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
         self.assertIn("release.push", self.ok(other, "missing").splitlines())
 
+    def test_binding_follows_the_remote_a_plain_push_uses(self):
+        d = self.repo(remote="https://github.com/victim/prod.git")
+        self.ok(d, "set", "release.push", '"auto"')
+        self.ok(d, "confirm")
+        self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+        self.git(d, "remote", "add", "evil", "https://evil.example/x.git")
+        branch = self.git(d, "symbolic-ref", "--short", "HEAD").strip()
+        self.git(d, "config", f"branch.{branch}.pushRemote", "evil")
+        self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+        self.git(d, "config", "--unset", f"branch.{branch}.pushRemote")
+        self.git(d, "config", "remote.pushDefault", "evil")
+        self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+
     def test_symlinks_in_the_store_are_refused(self):
         d = self.repo()
         path = Path(self.ok(d, "path").strip())

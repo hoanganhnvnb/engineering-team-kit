@@ -223,6 +223,19 @@ def svn_root(cwd: Path) -> Path | None:
     return None
 
 
+def push_remote(root: Path) -> str:
+    """The remote a plain `git push` on the current branch uses: branch.<b>.pushRemote, then
+    remote.pushDefault, then branch.<b>.remote, then origin."""
+    branch = git(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+    keys = ([f"branch.{branch}.pushRemote"] if branch else []) + ["remote.pushDefault"] + \
+        ([f"branch.{branch}.remote"] if branch else [])
+    for key in keys:
+        name = git(["config", "--get", key], root)
+        if name and name != ".":
+            return name
+    return "origin"
+
+
 def identify(cwd: Path | None = None) -> dict:
     """vcs type, root, raw origin URL, push URL and the profile key for the project at cwd.
 
@@ -234,8 +247,8 @@ def identify(cwd: Path | None = None) -> dict:
     if top:
         root = Path(os.path.realpath(top))
         remote = git(["config", "--get", "remote.origin.url"], root) or None
-        if remote:  # what `git push origin` really uses: pushurl and pushInsteadOf applied
-            push = git(["remote", "get-url", "--push", "origin"], root) or None
+        if remote:  # where a plain `git push` really goes: pushurl and pushInsteadOf applied
+            push = git(["remote", "get-url", "--push", push_remote(root)], root) or None
         vcs = "git"
     else:
         root, remote = svn_root(cwd), None
