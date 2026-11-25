@@ -131,13 +131,16 @@ Honest list. If one of these bites you, an issue is welcome.
   own permission settings. The Lead is told not to push, deploy, or discard work, and the
   skills say so, but no hook enforces it for the main session. A plugin shouldn't change
   how your other sessions behave.
-- Needs `sh` and Python 3.12+. `scripts/etk.sh` and the hook wrapper try `python3`,
-  `python3.13`, `python3.12`, `/usr/bin/python3`, `/usr/local/bin/python3`,
-  `/opt/homebrew/bin/python3`, then `python`, skipping any that don't run or are older than
-  3.12 (a pyenv/asdf shim without its root, a deleted venv, an old system Python). Without
-  a suitable Python, calls from the plugin's subagents are blocked with "engineering-team
-  needs Python 3.12+ for its guard; install it or disable the plugin" (the guard fails
-  closed); the main session is unaffected. The snapshot step fails visibly.
+- Needs `sh` and Python 3.12+. One shared finder (`scripts/find-python.sh`) serves
+  `scripts/etk.sh`, the hook wrapper, `selftest.sh` and `evals/run.sh`. It tries, in order:
+  `$ETK_PYTHON`; `python3`, `python3.13`, `python3.12`, `python` on `PATH`; the system paths
+  `/usr/bin`, `/usr/local/bin` and `/opt/homebrew/bin`; then the version folders of pyenv, uv,
+  asdf and mise under your home directory. Each candidate is run first, so a pyenv/asdf shim
+  without its root, a deleted venv or an old system Python is skipped. The project folder is
+  never searched. Without a suitable Python, calls from the plugin's subagents are blocked with
+  "engineering-team needs Python 3.12+ for its guard; install it or disable the plugin" plus the
+  install options (the guard fails closed); the main session is unaffected. The snapshot step
+  fails visibly. Nothing is downloaded or installed for you.
 - Inline-code detection for read-only roles (`node -e`, `python -c` writing files) is a
   pattern match on common write calls, not an interpreter. It catches mistakes, not intent.
   Blocking inline code outright wouldn't close the gap (a script in the temp dir runs the

@@ -3,6 +3,13 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
+## Unreleased
+
+- Python lookup is shared and wider. `scripts/find-python.sh` also checks `$ETK_PYTHON`
+  and the pyenv, uv, asdf and mise version folders, so a `python3` shim that points at an
+  old version no longer hides an installed 3.12. The "not found" message now says how to
+  install one.
+
 ## 0.4.0
 
 - **Behaviour change: the Lead can now ship.**

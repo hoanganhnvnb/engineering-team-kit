@@ -5,7 +5,7 @@ installer script and never edits your settings files by hand. The `claude plugin
 commands add entries to your settings without overwriting what's there.
 
 Requirements: Claude Code with plugin support (built and tested on 2.1.329), `git`, and
-Python 3.12+ on `PATH` (`python3`, `python3.12` or `python3.13`; the scripts and hook use the standard library only). Without it the plugin's subagents are blocked by the guard until you install it or disable the plugin.
+Python 3.12+ (the scripts and hook use the standard library only). It is found on `PATH` (`python3`, `python3.13`, `python3.12`), in the usual system folders, or in the folders pyenv, uv, asdf and mise install to. If yours lives somewhere else, set `ETK_PYTHON=/path/to/python3.12`. Without one, the plugin's subagents are blocked by the guard until you install Python or disable the plugin, and the error message says how.
 
 ## 1. Install for yourself (all projects)
 
