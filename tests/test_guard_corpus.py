@@ -1052,8 +1052,33 @@ GIT_OPTIONS = (
     ]]
 )
 
+# Environment that points git at other config or repositories.
+GIT_ENV = (
+    [(r, c, "block") for r in ("rev", "qa") for c in [
+        "HOME=/tmp/x git log",
+        "XDG_CONFIG_HOME=/tmp/x git log",
+        "GIT_DIR=/x git log",
+        "GIT_WORK_TREE=/x git status",
+        "GIT_CONFIG=/x git log",
+        "GIT_CONFIG_NOSYSTEM=1 git log",
+        "GIT_COMMON_DIR=/x git log",
+        "GIT_INDEX_FILE=/x git status",
+        "env HOME=/tmp git log",
+        "export HOME=/tmp; git log",
+        "HOME=/tmp; git log",
+        "declare -x XDG_CONFIG_HOME=/tmp; git log",
+    ]]
+    + [(r, c, "allow") for r in ("rev", "qa") for c in [
+        "LANG=C git log",
+        "LC_ALL=C git status",
+        "TZ=UTC git log",
+        "FOO=1 npm test",
+    ]]
+    + [("dev", "HOME=/tmp/x git log", "allow"), ("dev", "GIT_DIR=.git git log", "allow")]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV)
 
 
 def make_project(base: Path) -> Path:
