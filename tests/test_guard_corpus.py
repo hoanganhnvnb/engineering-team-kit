@@ -1322,10 +1322,28 @@ class GuardCorpus(unittest.TestCase):
             self.assertEqual(self.verdict("rev", "git diff --stat"), "block")
             self.assertEqual(self.verdict("rev", "git diff HEAD"), "allow")
 
-    def test_hook_matcher_covers_mcp_tools(self):
+    def test_hook_matcher_covers_every_tool(self):
         hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
-        matcher = hooks["hooks"]["PreToolUse"][0]["matcher"]
-        self.assertIn("mcp__.*", matcher.split("|"))
+        self.assertEqual(hooks["hooks"]["PreToolUse"][0]["matcher"], "*")
+
+    def test_other_shell_tools_and_unknown_tools(self):
+        self.skip_if_repo_under_temp()
+
+        def run(role, tool, inp):
+            data = {"tool_name": tool, "tool_input": inp, "cwd": str(self.project), "agent_type": ROLES[role]}
+            with contextlib.redirect_stderr(io.StringIO()):
+                return "block" if guard.decide(data) is not None else "allow"
+        for role in ("dev", "rev", "qa"):
+            with self.subTest(role=role):
+                self.assertEqual(run(role, "Monitor", {"command": "git push origin main"}), "block")
+                self.assertEqual(run(role, "Monitor", {"command": "rm -rf /home/x"}), "block")
+                self.assertEqual(run(role, "Monitor", {"command": "git status"}), "allow")
+                self.assertEqual(run(role, "PowerShell", {"command": "git push"}), "block")
+                self.assertEqual(run(role, "CronCreate", {}), "block")
+                for tool in ("Read", "Grep", "Glob", "WebFetch", "TodoWrite"):
+                    self.assertEqual(run(role, tool, {}), "allow", tool)
+        self.assertIsNone(guard.decide({"tool_name": "Monitor", "tool_input": {"command": "git push"},
+                                        "cwd": str(self.project)}), "main session is not guarded")
 
     def test_corpus(self):
         self.skip_if_repo_under_temp()

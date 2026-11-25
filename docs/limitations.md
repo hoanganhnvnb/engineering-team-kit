@@ -64,6 +64,12 @@ Honest list. If one of these bites you, an issue is welcome.
   blocks rather than guesses, but it can't promise to catch everything. Real isolation
   needs OS-level controls: a container or VM, a read-only mount or separate user for the
   read-only roles, and credentials that can't push or deploy.
+- **Unknown tools are blocked for engineering-team agents.** The hook sees every tool call.
+  `Bash` and `Monitor` commands go through the same shell checks; file tools and `mcp__*`
+  tools have their own rules; a short list of read-only tools (Read, Grep, Glob, WebFetch…)
+  passes. Anything else is blocked for our agents. If Claude Code adds a harmless tool and
+  an agent needs it, add it to `SAFE_TOOLS` in `hooks/guard.py`. The main session only pays
+  for a `sh` start per tool call; the wrapper exits before Python runs.
 - **`etk.sh exec` is only as guarded as the guard's wrapper handling.** `exec <gate> --type t
   -- <cmd>` runs `<cmd>` itself, so for a guarded role the command text is only checked to
   the extent the guard looks through that wrapper. It refuses an empty command, and no skill

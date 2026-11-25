@@ -1491,6 +1491,15 @@ def check_mcp(tool: str) -> None:
                       f"the user decides that")
 
 
+# Tools that only read, plan or report. Any other tool not checked in decide() is
+# blocked for our agents, so a new shell-capable tool can't slip past the policy.
+SAFE_TOOLS = {"Read", "Glob", "Grep", "LS", "NotebookRead", "LSP", "WebFetch", "WebSearch",
+              "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput",
+              "BashOutput", "KillShell", "KillBash", "TaskStop", "ToolSearch", "Skill",
+              "ListMcpResourcesTool", "ReadMcpResourceTool", "SendMessage"}
+SHELL_TOOLS = {"Bash", "Monitor"}
+
+
 def decide(data: dict) -> str | None:
     """Reason to block this tool call, or None to allow it."""
     if not isinstance(data, dict):
@@ -1503,7 +1512,7 @@ def decide(data: dict) -> str | None:
     inp = data.get("tool_input") or {}
     cwd = data.get("cwd") or os.getcwd()
     try:
-        if tool == "Bash":
+        if tool in SHELL_TOOLS:
             check_bash(str(inp.get("command", "")), cwd, role)
         elif isinstance(tool, str) and tool.startswith("mcp__"):
             check_mcp(tool)
@@ -1520,6 +1529,9 @@ def decide(data: dict) -> str | None:
                 raise Blocked(f"{role} is read-only")
             if role == "qa-engineer" and (tool != "Write" or os.path.exists(path)):
                 raise Blocked("qa-engineer may only create new test files, not change existing ones")
+        elif tool not in SAFE_TOOLS:
+            raise Blocked(f"the guard doesn't know the `{tool}` tool, so it can't check it; "
+                          f"use Bash or the file tools")
     except Blocked as b:
         return str(b)
     except Exception as e:  # a guard that can't decide must not wave the call through
