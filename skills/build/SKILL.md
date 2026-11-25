@@ -22,6 +22,8 @@ file only when you reach the step that needs it.
 
 !`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover --data "${CLAUDE_PLUGIN_DATA}"`
 
+Plugin data dir (`DATA` in the workflows): `${CLAUDE_PLUGIN_DATA}`
+
 ## 1. Understand (always)
 
 1. Restate the goal in one sentence and name the smallest change that achieves it.

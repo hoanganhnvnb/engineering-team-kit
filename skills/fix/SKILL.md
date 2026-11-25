@@ -20,6 +20,8 @@ how to trigger it) and stop.
 
 !`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover --data "${CLAUDE_PLUGIN_DATA}"`
 
+Plugin data dir (`DATA` in the workflows): `${CLAUDE_PLUGIN_DATA}`
+
 ## Steps
 
 1. **Understand.** Read the applicable project instructions from the snapshot

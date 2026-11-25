@@ -1,12 +1,12 @@
 # Workflow profile: how this developer ships this project
 
 Each developer keeps their own profile for each project. It records how they commit,
-push, integrate and deploy. It lives in the plugin's data folder (`${CLAUDE_PLUGIN_DATA}`),
+push, integrate and deploy. It lives in the plugin's data folder (`DATA`),
 outside every repository, so it can never be committed. The profile is used only by the
 Lead. Subagents never read it, write it, or act on it.
 
-All commands below take `--data "${CLAUDE_PLUGIN_DATA}"`. Write it exactly like that,
-and Claude Code fills in the path. Below, `profile` is short for
+All commands below take `--data DATA`. `DATA` is the path on the "Plugin data dir" line
+of the skill you are running; write that literal path. Below, `profile` is short for
 `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" profile`.
 
 ## When to read this file

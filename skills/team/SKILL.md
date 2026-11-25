@@ -17,6 +17,8 @@ without check-ins. You stop only at the gates in
 
 !`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover --data "${CLAUDE_PLUGIN_DATA}"`
 
+Plugin data dir (`DATA` in the workflows): `${CLAUDE_PLUGIN_DATA}`
+
 ## Phases
 
 Record each phase change with `etk.sh run phase <name> RUN`. `RUN` is the directory
