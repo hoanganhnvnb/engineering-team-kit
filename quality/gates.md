@@ -189,7 +189,8 @@ add the flag, not remove it.
    meaning the user actually said so in this conversation. The Lead cannot accept risk
    for the user.
 5. No release action exited non-zero without a later successful retry (same action and
-   target), and no L4 decision is still `pending`.
+   target), and no L4 decision is still `pending`. `check` also rejects an L4 decision
+   that is `autonomous`, or `approved` without the user's words in `answer_quote`.
 
 Otherwise the outcome is `INCOMPLETE` (work remains) or `BLOCKED` (needs the user),
 and the report says exactly what is missing.

@@ -597,6 +597,10 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
             continue
         if not _text(d.get("question")):
             errors.append(f"decision {did}: needs a question")
+        if d["level"] == "L4" and d["status"] == "autonomous":
+            errors.append(f"decision {did}: L4 can't be autonomous (only the user can settle it)")
+        if d["level"] == "L4" and d["status"] == "approved" and len(_text(d.get("answer_quote"))) < MIN_QUOTE:
+            errors.append(f"decision {did}: approved L4 needs the user's verbatim words in 'answer_quote'")
         if outcome == "COMPLETE" and d["level"] == "L4" and d["status"] == "pending":
             errors.append(f"COMPLETE but L4 decision {did} is still pending (only the user can settle it)")
 

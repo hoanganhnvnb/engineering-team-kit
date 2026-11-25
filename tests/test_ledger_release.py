@@ -452,6 +452,21 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.assertEqual(self.check(run).returncode, 0, self.check(run).stdout)
         self.assertEqual(self.etk("decide", "--id", "D2", "--level", "L9", "--question", "x", str(run)).returncode, 2)
 
+    def test_l4_decision_needs_the_users_answer(self):
+        run, _ = self.init("--kind", "ship")
+        q = ("--id", "D1", "--level", "L4", "--question", "Drop the legacy table?")
+        self.etk("decide", *q, "--status", "autonomous", str(run))
+        self.assertIn("L4 can't be autonomous", self.check(run).stdout)
+        for quote in ((), ("--answer-quote", " y ")):
+            self.etk("decide", *q, "--status", "approved", *quote, str(run))
+            self.assertIn("approved L4 needs the user's verbatim words", self.check(run).stdout)
+        self.etk("decide", *q, "--status", "approved", "--answer-quote", "yes, drop it", str(run))
+        r = self.check(run)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.etk("decide", "--id", "D2", "--level", "L3", "--question", "Which cache?", "--status", "autonomous",
+                 str(run))
+        self.assertEqual(self.check(run).returncode, 0)
+
     def test_g7_rules_for_ship(self):
         run = self.ship_run()
         self.assertIn("G7: PASS without any recorded release action", self.complete(run).stdout)
