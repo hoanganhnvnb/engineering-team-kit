@@ -564,8 +564,44 @@ GIT_CHECKOUT = (
     ]]
 )
 
+# R1-4: the repository itself, and bulk deletes through git.
+GIT_DIR_AND_CLEAN = (
+    [("dev", c, "block") for c in [
+        "rm -rf .git",
+        "rm -r .git/hooks",
+        "rm .git/index",
+        "rm -f .git/index.lock",
+        "rm -rf src/../.git",
+        "cd src && rm -rf ../.git",
+        "mv .git /tmp/g",
+        "find .git -delete",
+        "git clean -d",
+        "git clean -i",
+        "git clean -fdx",
+        "git -c clean.requireForce=false clean -d",
+        "git rm -rf .",
+        "git rm -r src",
+        "git rm -f src/a.js",
+        "git rm -r --force .",
+        "git rm '*'",
+        "git rm .",
+        "git rm -r --cached -f src",
+    ]]
+    + [("dev", c, "allow") for c in [
+        "git clean -n",
+        "git clean -dn",
+        "git clean --dry-run -d",
+        "git rm src/a.js",
+        "git rm --cached src/a.js",
+        "git rm -r --cached dist",
+        "rm .gitignore",
+        "rm -rf .github/tmp",
+        "git mv src/a.js src/b.js",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN)
 
 
 def make_project(base: Path) -> Path:

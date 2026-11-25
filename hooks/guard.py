@@ -553,8 +553,12 @@ def check_git(args: list[str], cwd: str, cur: str | None) -> None:
         raise Blocked("pushing is up to the user; leave commits local")
     if sub == "reset" and has("--hard", "--merge", "--keep"):
         raise Blocked("reset --hard discards work; ask the Lead instead")
-    if sub == "clean" and (short("f") or has("--force")):
-        raise Blocked("git clean deletes untracked files that may be the user's")
+    if sub == "clean" and not (short("n") or has("--dry-run")):
+        raise Blocked("git clean deletes untracked files that may be the user's; only a dry run (-n) is allowed")
+    if sub == "rm" and not (has("--cached") and not (short("f") or has("--force"))):
+        broad = {".", "*", "./", ":/", "./*"}
+        if short("r") or short("f") or has("--force") or any(w in broad for w in rest):
+            raise Blocked("`git rm` with -r/-f or a broad pathspec deletes work from the tree")
     if sub == "checkout":
         check_checkout(rest, cwd)
     if sub == "restore" and not (has("--staged", "-S") and not has("--worktree", "-W")):
@@ -583,7 +587,24 @@ def check_git(args: list[str], cwd: str, cur: str | None) -> None:
                 raise Blocked(f"`git add -A/.` would stage secret-looking files {secrets[:3]}; add paths explicitly")
 
 
+def git_dir_path(path: str, cur: str | None) -> bool:
+    """A path inside a `.git` directory, or inside this repository's git directory."""
+    if ".git" in path.replace("\\", "/").split("/"):
+        return True
+    if cur is None:
+        return False
+    try:
+        out = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=cur, capture_output=True,
+                             text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return bool(out) and inside(absjoin(path, cur), os.path.join(cur, out))
+
+
 def check_rm(args: list[str], root: str, cur: str | None) -> None:
+    for target in (a for a in args if not a.startswith("-")):
+        if git_dir_path(target, cur):
+            raise Blocked(f"`rm {target}` would damage the repository's .git directory")
     opts = [a for a in args if a.startswith("-")]
     recursive = any("r" in o.lower() for o in opts if not o.startswith("--")) or "--recursive" in opts
     if not recursive:
@@ -855,6 +876,8 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
         check_git(words[1:], root, cur)
     if prog == "rm":
         check_rm(words[1:], root, cur)
+    if prog == "mv" and any(git_dir_path(w, cur) for w in words[1:] if not w.startswith("-")):
+        raise Blocked("moving a .git directory would damage the repository")
     for target in redirect_targets(redirs) + outputs:
         check_write_target(target, role, root, cur)
     if create_only:
