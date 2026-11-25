@@ -215,6 +215,7 @@ class ReleaseLedgerTests(unittest.TestCase):
             self.assertIn("changed after it was last confirmed", r.stderr)
         self.assertEqual((run / "gates.json").read_text(), before)
         self.profile("confirm")
+        self.profile("remember", "QA resets nightly")  # a note grants nothing: no new confirm needed
         for action in ("push", "commit"):
             r = self.etk("authorize", "--action", action, "--source", "profile", *data, str(run))
             self.assertEqual(r.returncode, 0, r.stderr)

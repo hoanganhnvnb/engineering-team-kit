@@ -823,7 +823,8 @@ def main(argv: list[str] | None = None) -> int:
             mem = prof.get("memory") if isinstance(prof.get("memory"), list) else []
             mem.append({"fact": fact, "source": a.source, "date": dt.date.today().isoformat()})
             prof["memory"] = mem[-MAX_MEMORY:]
-            save(path, stamp(prof, ident), data)
+            # A note grants nothing, so it keeps `updated_at` and doesn't call for a new confirm.
+            save(path, prof if prof.get("updated_at") else stamp(prof, ident), data)
             print(f"remembered ({len(prof['memory'])} note(s))")
         return 0
     except UsageError as e:
