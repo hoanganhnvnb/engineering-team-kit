@@ -49,7 +49,7 @@ survives plugin updates. It is deleted when you uninstall the plugin, unless you
 On the first `team` run in a project, Claude detects what it can: git or SVN, the host
 and its CLI, the default branch, your commit style and language, commit tooling, and
 deploy candidates. It then asks only the rest, in at most two short rounds of
-questions: branch model, push automatically or ask, PR or direct merge, merge method,
+questions: branch model, commit and push automatically or ask, PR or direct merge, merge method,
 wait for CI, and deploy targets. If you don't describe a deploy, deploy is skipped.
 
 To change a habit, just say it ("từ giờ tạo PR thay vì merge thẳng"). The Lead updates

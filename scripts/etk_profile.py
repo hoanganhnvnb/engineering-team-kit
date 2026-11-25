@@ -627,7 +627,7 @@ def missing(prof: dict, ident: dict) -> list[str]:
         vcs = ident["vcs"]
     decided = get(prof, "deploy.none") is True or bool(get(prof, "deploy.targets"))
     if vcs == "git":
-        out += [p for p in ("branches.model", "release.push") if get(prof, p) is None]
+        out += [p for p in ("branches.model", "release.commit", "release.push") if get(prof, p) is None]
         if ident["remote"] and get(prof, "release.integrate") is None:
             out.append("release.integrate")
         if get(prof, "commit.style") is None:

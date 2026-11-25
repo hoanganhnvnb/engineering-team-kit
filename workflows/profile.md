@@ -27,6 +27,8 @@ Otherwise the brief profile in the snapshot is all you need.
    - **Branch model** (`branches.model`): trunk (commit straight to the default
      branch) / a feature branch per task (`branches.name_pattern`, default
      `{type}/{slug}`) / gitflow from `develop`.
+   - **Commit** (`release.commit`): commit automatically once checks pass
+     (Recommended) / ask first.
    - **Push** (`release.push`): push automatically once checks pass / ask first.
    - **Integrate** (`release.integrate`): open a PR / merge directly after
      confirmation / leave the branch. Then the merge method and whether to wait for CI

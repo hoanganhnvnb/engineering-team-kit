@@ -311,8 +311,10 @@ class StoreTests(Base):
     def test_missing(self):
         d = self.repo(remote="git@github.com:o/r.git")
         self.assertEqual(self.ok(d, "missing").split(),
-                         ["vcs.type", "branches.model", "release.push", "release.integrate", "commit.style", "deploy"])
-        for path, value in (("vcs.type", "git"), ("branches.model", "feature"), ("release.push", "confirm"),
+                         ["vcs.type", "branches.model", "release.commit", "release.push", "release.integrate",
+                          "commit.style", "deploy"])
+        for path, value in (("vcs.type", "git"), ("branches.model", "feature"), ("release.commit", "auto"),
+                            ("release.push", "confirm"),
                             ("commit.style", "conventional"), ("release.integrate", "pr")):
             self.ok(d, "set", path, value)
         self.assertEqual(self.ok(d, "missing").split(), ["deploy"])
@@ -396,7 +398,8 @@ class StoreTests(Base):
         self.assertEqual(lines[0], etk_profile.RECONFIRM)
         self.assertLessEqual(len(lines), 5)
         self.assertNotIn("push auto", "\n".join(lines))
-        self.assertEqual(self.ok(d, "missing").splitlines(), [etk_profile.RECONFIRM, "release.push"])
+        self.assertEqual(self.ok(d, "missing").splitlines(),
+                         [etk_profile.RECONFIRM, "release.commit", "release.push"])
         out = DiscoverProfileTests.discover(self, d, "--data", str(self.data))
         self.assertIn("profile from a different checkout/remote; re-confirm", out)
         self.ok(d, "set", "commit.style", "conventional")  # an edit doesn't re-approve the binding
@@ -482,10 +485,12 @@ class DiscoverProfileTests(Base):
             self.assertNotIn("### Workflow profile", out)
         out = self.discover(d, "--data", str(self.data))
         self.assertIn("### Workflow profile", out)
-        self.assertIn("- missing: vcs.type, branches.model, release.push, release.integrate, commit.style, deploy "
+        self.assertIn("- missing: vcs.type, branches.model, release.commit, release.push, release.integrate, "
+                      "commit.style, deploy "
                       "→ onboard (workflows/profile.md)", out)
-        for path, value in (("vcs.type", "git"), ("branches.model", "trunk"), ("release.push", "auto"),
-                            ("release.integrate", "none"), ("commit.style", "project"), ("deploy.none", "true")):
+        for path, value in (("vcs.type", "git"), ("branches.model", "trunk"), ("release.commit", "auto"),
+                            ("release.push", "auto"), ("release.integrate", "none"), ("commit.style", "project"),
+                            ("deploy.none", "true")):
             self.ok(d, "set", path, value)
         self.ok(d, "remember", "x")
         out = self.discover(d, "--data", str(self.data))
