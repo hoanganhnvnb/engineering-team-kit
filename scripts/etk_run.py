@@ -688,8 +688,10 @@ def merge_exec(before: dict, after, gate_name: str) -> tuple[dict, bool]:
 
     The command is repository code (a test suite), so everything else it may have written into
     the file (gate status, findings, authorizations, actions, other fields) is dropped. Records it
-    appended to another gate are kept but marked `recorded_by: nested-exec`, so `check` treats
-    their exit codes as self-reported. Returns (ledger, whether anything was discarded)."""
+    appended to any gate, this one included, are kept but marked `recorded_by: nested-exec`, so
+    `check` treats their exit codes as self-reported: the command could have written them itself.
+    `exec`'s own record of the command comes after them. Returns (ledger, whether anything was
+    discarded)."""
     led, kept = json.loads(json.dumps(before)), json.loads(json.dumps(before))
     after_gates = after.get("gates") if isinstance(after, dict) and isinstance(after.get("gates"), dict) else {}
     for g, gate in led["gates"].items():
@@ -702,8 +704,7 @@ def merge_exec(before: dict, after, gate_name: str) -> tuple[dict, bool]:
             continue
         added = [c for c in new[len(old):] if isinstance(c, dict) and isinstance(c.get("cmd"), str)]
         kept["gates"][g]["commands"] = old + added
-        if g != gate_name:
-            added = [dict(c, recorded_by="nested-exec", nested_in=gate_name) for c in added]
+        added = [dict(c, recorded_by="nested-exec", nested_in=gate_name) for c in added]
         gate["commands"] = old + added
     return led, after != kept
 

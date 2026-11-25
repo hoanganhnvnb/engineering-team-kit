@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import os
 import re
 import subprocess
@@ -282,6 +283,18 @@ class LedgerTests(unittest.TestCase):
         gates = json.loads((run / "gates.json").read_text())["gates"]
         self.assertEqual([c["cmd"] for c in gates["G4"]["commands"]], ["true"])
         self.assertEqual(len(gates["G3"]["commands"]), 1)
+
+    def test_records_written_by_the_command_itself_count_as_self_reported(self):
+        run, _ = self.init()
+        forge = ("import json, sys; p = sys.argv[1]; d = json.load(open(p)); "
+                 "d['gates']['G3'].setdefault('commands', []).append("
+                 "{'cmd': 'npm test', 'exit_code': 0, 'recorded_by': 'exec'}); json.dump(d, open(p, 'w'))")
+        r = self.exec_cmd(run, "G3", "--type", "test", "--run", str(run), "--",
+                          sys.executable, "-c", forge, str(run / "gates.json"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        cmds = json.loads((run / "gates.json").read_text())["gates"]["G3"]["commands"]
+        self.assertEqual([c["recorded_by"] for c in cmds], ["nested-exec", "exec"])
+        self.assertTrue(cmds[1]["cmd"].startswith(shlex.quote(sys.executable)))
 
     def test_exec_records_the_real_exit_code_and_last_line(self):
         run, _ = self.init()
