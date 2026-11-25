@@ -532,6 +532,48 @@ def check_checkout(rest: list[str], cwd: str) -> None:
                       "use `git switch` for branches")
 
 
+# Config that decides where a push goes or which programs git runs. A subagent changing it could
+# redirect the Lead's next push (or select another developer's workflow profile), so only reads pass.
+GIT_CONFIG_GUARDED = re.compile(r"^((remote|url|filter|diff|credential|include|includeif)(\.|$)|"
+                                r"core\.(hookspath|sshcommand|fsmonitor)$)", re.I)
+GIT_CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool",
+                    "--list", "-l"}
+GIT_CONFIG_WRITES = {"--add", "--unset", "--unset-all", "--replace-all", "--rename-section", "--remove-section"}
+GIT_CONFIG_WITH_VALUE = {"-f", "--file", "--blob", "--type", "--default", "--comment", "--value"}
+GIT_REMOTE_WRITES = {"add", "set-url", "rename", "remove", "rm", "set-branches"}
+
+
+def git_config_writes(rest: list[str]) -> list[str] | None:
+    """Names (keys or sections) a `git config` call writes, [""] for one that can't be told (`--edit`),
+    or None for a read. Knows the classic flags and the `git config set|unset|...` verbs (git 2.46+)."""
+    words, flags, i = [], set(), 0
+    while i < len(rest):
+        w = rest[i]
+        if w == "--":
+            words += rest[i + 1:]
+            break
+        if w.startswith("-") and w != "-":
+            name = w.split("=", 1)[0]
+            flags.add(name)
+            i += 2 if name in GIT_CONFIG_WITH_VALUE and "=" not in w else 1
+            continue
+        words.append(w)
+        i += 1
+    verb = words[0] if words else ""
+    if verb in {"get", "list"}:
+        return None
+    if verb in {"set", "unset", "rename-section", "remove-section", "edit"}:
+        args = words[1:]
+        return [""] if verb == "edit" or not args else args[:2] if verb == "rename-section" else args[:1]
+    if flags & {"--edit", "-e"}:
+        return [""]
+    if flags & GIT_CONFIG_WRITES:
+        return (words[:2] if "--rename-section" in flags else words[:1]) or [""]
+    if flags & GIT_CONFIG_READS or len(words) < 2:
+        return None
+    return words[:1]
+
+
 def check_git(args: list[str], cwd: str, cur: str | None) -> None:
     root = cwd
     i = 0
@@ -553,6 +595,16 @@ def check_git(args: list[str], cwd: str, cur: str | None) -> None:
 
     if sub == "push":
         raise Blocked("pushing is up to the user; leave commits local")
+    if sub == "config":
+        names = git_config_writes(rest)
+        if names is not None and any(n == "" or GIT_CONFIG_GUARDED.match(n) for n in names):
+            raise Blocked("changing remotes, URL rewrites, hooks, filters, diff drivers, credentials or includes "
+                          "in git config is the Lead's call (it decides where pushes go and what git runs); "
+                          "reads like `git config --get` are fine")
+    if sub == "remote":
+        verb = next((w for w in rest if not w.startswith("-")), "")
+        if verb in GIT_REMOTE_WRITES:
+            raise Blocked(f"`git remote {verb}` changes where the Lead pushes; leave remotes to the Lead")
     if sub == "reset" and has("--hard", "--merge", "--keep"):
         raise Blocked("reset --hard discards work; ask the Lead instead")
     if sub == "clean" and not (short("n") or has("--dry-run")):
@@ -834,6 +886,27 @@ def check_startup_hook_vars(assigned: list[str]) -> None:
         raise Blocked(f"`{named[0].split('=')[0]}` makes the shell run code later; can't be checked")
 
 
+def safe_home(cmd: str) -> str | None:
+    """$HOME for expanding `cd ~` / `cd $HOME/x`, or None when the command could change HOME first
+    (any mention of HOME other than reading `$HOME`/`${HOME}`), or HOME isn't an absolute path."""
+    home = os.environ.get("HOME", "")
+    if not os.path.isabs(home) or re.search(r"\bHOME\b", re.sub(r"\$(\{HOME\}|HOME\b)", "", cmd)):
+        return None
+    return os.path.normpath(home)
+
+
+def expand_home(target: str, home: str | None) -> str:
+    """`~`, `~/x`, `$HOME`, `${HOME}/x` with HOME filled in; anything else unchanged."""
+    if home is None:
+        return target
+    m = re.match(r"^(~|\$HOME\b|\$\{HOME\})(/.*)?$", target)
+    return home + (m.group(2) or "") if m else target
+
+
+# HOME as the current top-level command may use it (set per check at depth 0; None = don't expand).
+_CD_HOME: str | None = None
+
+
 def next_dir(words: list[str], cur: str | None, dirs: list, cdpath_unknown: bool = False) -> str | None:
     """Working directory after `cd`/`pushd`/`popd`; None once it can't be known.
 
@@ -853,6 +926,8 @@ def next_dir(words: list[str], cur: str | None, dirs: list, cdpath_unknown: bool
     target = operands[0] if operands else None
     if prog == "pushd":
         dirs.append(cur)
+    if target is not None and not cdpath_unknown:
+        target = expand_home(target, _CD_HOME)
     if target is None or target == "-" or target.startswith("~") or re.search(r"[$`*?\[(]", target):
         return None
     if (cdpath_unknown or os.environ.get("CDPATH")) and not target.startswith(("/", "./", "../")) and target not in {".", ".."}:
@@ -1000,6 +1075,9 @@ def in_plugin_data(path: str, cur: str | None) -> bool:
     p = path.strip().strip("'\"")
     if "CLAUDE_PLUGIN_DATA" in p or re.search(r"(^|/)\.claude/plugins/data(/|$)", p):
         return True
+    full = absjoin(p, cur)
+    if full is not None and re.search(r"/\.claude/plugins/data(/|$)", os.path.normpath(full)):
+        return True  # a relative path after `cd ~/.claude/plugins` lands there too
     data = os.environ.get("CLAUDE_PLUGIN_DATA", "").strip()
     if not data or not os.path.isabs(data):
         return False
@@ -1021,7 +1099,22 @@ def in_run_records(path: str, cur: str | None) -> bool:
     return full is not None and re.search(r"/\.etk(/|$)", os.path.realpath(full), re.I) is not None
 
 
+def in_git_control(path: str, cur: str | None) -> bool:
+    """`.git/config` or a file under `.git/hooks/`: writing them changes where pushes go or what runs on
+    the Lead's next commit/push, the same as the `git config` keys check_git refuses."""
+    p = path.strip().strip("'\"")
+    for spelled in (p, absjoin(p, cur)):
+        if spelled is None:
+            continue
+        parts = os.path.normpath(spelled).replace("\\", "/").split("/")
+        if any(a == ".git" and b in {"config", "hooks"} for a, b in zip(parts, parts[1:])):
+            return True
+    return False
+
+
 def check_protected(path: str, root: str, cur: str | None) -> None:
+    if in_git_control(path, cur):
+        raise Blocked(f"`{path}` is git's config or hooks; only the Lead changes where pushes go or what git runs")
     if in_run_records(path, cur):
         raise Blocked(f"`{path}` is an ETK run record; only the Lead writes the ledger")
     if in_plugin_data(path, cur):
@@ -1061,7 +1154,7 @@ def callback_scripts(prog: str, args: list[str]) -> list[str]:
 
 ETK_ENTRYPOINTS = {"etk.sh", "etk_run.py"}
 PROFILE_WRITES = {"set", "unset", "confirm", "remember"}
-LEDGER_WRITES = {"phase", "authorize", "act", "decide"}
+LEDGER_WRITES = {"init", "phase", "authorize", "act", "decide"}
 
 
 def check_etk_state(words: list[str]) -> None:
@@ -1294,7 +1387,7 @@ GIT_OPTION_ALLOW.update({
 })
 GIT_OPTION_ALLOW.update({
     "branch": LIST_FLAGS, "tag": LIST_FLAGS,
-    "remote": {"-v", "--verbose"}, "worktree": {"--porcelain", "-z", "--verbose", "--detach", "--quiet", "-q", "-b", "-B"},
+    "remote": {"-v", "--verbose", "--push", "--all"}, "worktree": {"--porcelain", "-z", "--verbose", "--detach", "--quiet", "-q", "-b", "-B"},
     "stash": set(_DIFF) | {"--include-untracked", "--only-untracked"},
     "reflog": set(_LOG) | {"--date"}, "submodule": {"--cached", "--recursive", "--quiet", "-q"},
     "add": set("""-A --all -u --update -N --intent-to-add -v --verbose -n --dry-run --ignore-errors --renormalize
@@ -1471,6 +1564,9 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         raise Blocked("command nests shells too deeply to check")
     if cur is UNSET:
         cur = root
+    if depth == 0:
+        global _CD_HOME
+        _CD_HOME = safe_home(cmd)
     events = parse(cmd)
     read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
     if (read_only or role == "qa-engineer") and WRITE_CODE.search(cmd) and any(runs_inline_code(program(e.words)) for e in events if isinstance(e, Seg)):
@@ -1512,6 +1608,11 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             cur = None  # `cd x` may land somewhere else entirely
         if words and os.path.basename(words[0]) in {"cd", "pushd", "popd"}:
             check_assigned(assigns, words, role)
+            for t in [w for w in words[1:] if not w.startswith(("-", "+"))]:
+                for spelled in {t, expand_home(t, _CD_HOME)}:
+                    if in_run_records(spelled, cur) or in_plugin_data(spelled, cur):
+                        raise Blocked(f"`cd {t}` goes into ETK run records or the plugin data dir; only the Lead "
+                                      "works there (read files by their full path instead)")
             new = next_dir(words, cur, list(dirs) if in_pipe else dirs, taint)
             if not in_pipe:
                 if seg.after in {";", "||"}:  # the cd may have failed, leaving us where we were

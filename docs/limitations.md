@@ -71,11 +71,25 @@ Honest list. If one of these bites you, an issue is welcome.
   an agent needs it, add it to `SAFE_TOOLS` in `hooks/guard.py`. The main session only pays
   for a `sh` start per tool call; the wrapper exits before Python runs.
 - **Profile and release records are protected by name, not by a secret.** Subagents can't
-  write into the plugin data dir or `.etk/`, and can't run `profile set…` or
-  `run authorize|act|decide|phase`. A copy of the scripts, or inline code that builds the
+  write into the plugin data dir or `.etk/` (or `cd` into them), and can't run `profile set…`
+  or `run init|authorize|act|decide|phase`. They also can't change remotes, URL rewrites,
+  hooks, filters, diff drivers, credentials or includes through `git config`/`git remote`, or
+  write `.git/config` and `.git/hooks/`, because those decide where the Lead pushes. The
+  profile is looked up by the origin URL; its `auto` settings only count in the checkout and
+  for the push URL it was confirmed with. A copy of the scripts, or inline code that builds the
   path at runtime, gets past that, like any other guard gap. `run check` still requires
   every release action to match a permission that quotes your words, and the Lead,
   not a subagent, runs every outward step.
+- **`etk exec` keeps the command's hands off the ledger, not off the file.** The command
+  `exec` runs is repository code (a test suite). `exec` snapshots the ledger first and
+  afterwards restores everything but appended gate command records, so a test can't add
+  authorizations or flip a gate. Same-uid code can still write `.etk/runs/<id>/gates.json`
+  directly outside `exec` (a background process it leaves behind, a later build step); only
+  OS-level isolation stops that.
+- **A cd the guard can't follow hides where relative paths land.** `cd ~/…` and `cd $HOME/…`
+  are expanded from the hook's own HOME, unless the command mentions `HOME` in any other way
+  (`HOME=/x cd ~/…`, `export HOME=…`); then, like `cd $X`, later relative writes can't be
+  placed and aren't attributed to the plugin data dir.
 - **`etk.sh exec` is only as guarded as the guard's wrapper handling.** `exec <gate> --type t
   -- <cmd>` runs `<cmd>` itself, so for a guarded role the command text is only checked to
   the extent the guard looks through that wrapper. It refuses an empty command, and no skill

