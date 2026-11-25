@@ -167,8 +167,9 @@ add the flag, not remove it.
   names neither the target nor production/prod/live as whole words (`-`/`_` count as part of
   a word, so "web" isn't "web-staging"; a negated clause like "don't touch prod" doesn't count).
 
-- PASS: at least one recorded action, every one exit 0.
-- FAIL: an action failed.
+- PASS: at least one recorded action, and every failed one was retried later (same action
+  and target) with exit 0.
+- FAIL: an action failed and no later retry succeeded.
 - NOT_APPLICABLE: with the reason (no VCS, the user said to leave it uncommitted), and no
   recorded actions.
 
@@ -187,7 +188,8 @@ add the flag, not remove it.
 4. `accepted_risk` or `wont_fix` on a critical/high finding has `accepted_by_user: true`,
    meaning the user actually said so in this conversation. The Lead cannot accept risk
    for the user.
-5. No release action exited non-zero, and no L4 decision is still `pending`.
+5. No release action exited non-zero without a later successful retry (same action and
+   target), and no L4 decision is still `pending`.
 
 Otherwise the outcome is `INCOMPLETE` (work remains) or `BLOCKED` (needs the user),
 and the report says exactly what is missing.

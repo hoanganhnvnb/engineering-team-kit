@@ -418,6 +418,19 @@ class ReleaseLedgerTests(unittest.TestCase):
         out = self.complete(run, g7="PASS").stdout
         self.assertIn("G7: PASS but action #1 (push) exited 1", out)
 
+    def test_successful_retry_settles_a_failed_action(self):
+        run = self.ship_run()
+        self.auth_profile(run, "push")
+        self.etk("act", "--action", "push", "--target", "origin", "--exit", "1", str(run))
+        self.etk("act", "--action", "push", "--target", "other", "--exit", "0", str(run))
+        out = self.complete(run).stdout
+        self.assertIn("action #1 (push origin) exited 1", out)  # a different target doesn't settle it
+        self.etk("act", "--action", "push", "--target", "origin", "--exit", "0", str(run))
+        r = self.complete(run)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.etk("act", "--action", "push", "--target", "origin", "--exit", "1", str(run))
+        self.assertIn("action #4 (push origin) exited 1", self.complete(run).stdout)  # a later failure counts
+
     def test_pending_l4_decision_blocks_complete(self):
         run = self.ship_run()
         self.auth_profile(run, "push")

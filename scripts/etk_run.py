@@ -531,7 +531,7 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
         auths.append(au)
 
     acts = _list_of_dicts(ledger, "actions", errors)
-    failed = []
+    failed, succeeded = [], []
     for n, ac in enumerate(acts, 1):
         act, target = ac.get("action"), _text(ac.get("target"))
         label = f"action #{n} ({act}{' ' + target if target else ''})"
@@ -548,7 +548,9 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
             errors.append(f"{label}: target must be a string")
             continue
         if ac["exit"] != 0:
-            failed.append(label + f" exited {ac['exit']}")
+            failed.append((n, act, target.lower(), label + f" exited {ac['exit']}"))
+        else:
+            succeeded.append((n, act, target.lower()))
         if act in GATED_ACTIONS and not ac["gates_ok"]:
             errors.append(f"{label}: released before the gates passed (gates_ok false when it ran)")
         at = _ts(ac.get("at"))
@@ -574,6 +576,9 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
                        for au in named):
                 errors.append(f"{label}: production deploy, but no authorization quote names the target "
                               "or says production/prod/live")
+    # A failed step that a later run of the same action on the same target got through is settled.
+    failed = [msg for n, act, target, msg in failed
+              if not any(m > n and a == act and t == target for m, a, t in succeeded)]
     if outcome == "COMPLETE":
         errors.extend(f"COMPLETE but {f}" for f in failed)
 
