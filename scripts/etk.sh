@@ -5,6 +5,9 @@
 # it's used.
 #   etk.sh discover            project snapshot
 #   etk.sh run <args...>       ledger: init / check / render / stats / latest
+#   etk.sh profile <sub> --data <plugin data dir> [args...]
+#                              per-developer workflow profile: path / show / detect / set / unset /
+#                              missing / confirm / remember (kept outside the repo)
 #   etk.sh exec <gate> --type <t> -- <cmd...>
 #                              run a command and record its real exit code in the ledger
 # `exec` is its own entry point on purpose: the skills pre-approve `etk.sh run:*`, and a
@@ -19,7 +22,8 @@ case "$1" in
     fi
     script="$dir/etk_run.py" ;;
   exec) script="$dir/etk_run.py" ;;
-  *) echo "usage: etk.sh discover | run <args> | exec <gate> --type <t> -- <cmd>" >&2; exit 2 ;;
+  profile) script="$dir/etk_profile.py" ;;
+  *) echo "usage: etk.sh discover | run <args> | exec <gate> --type <t> -- <cmd> | profile <sub> --data <dir>" >&2; exit 2 ;;
 esac
 if [ "$1" != exec ]; then
   shift
