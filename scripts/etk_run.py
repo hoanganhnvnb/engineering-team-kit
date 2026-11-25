@@ -89,6 +89,7 @@ AUTH_SOURCES = {"prompt", "answer", "profile"}
 PROFILE_OK = {"commit", "push", "pr"}            # a workflow profile may pre-authorize only these
 NEEDS_USER_WORDS = {"merge", "tag", "deploy", "rollback"}  # need the user's own words (prompt/answer)
 GATED_ACTIONS = {"commit", "push", "pr", "merge", "tag", "deploy"}  # not before the gates pass
+OUTWARD_ACTIONS = GATED_ACTIONS - {"commit"}  # leave the machine: only from runs that build something (NEEDS_AC)
 # Whole words, where `-` and `_` count as part of a word: "prod" doesn't match "prod-eu" or "nonprod".
 PROD_WORDS = re.compile(r"(?<![\w-])(production|prod|live)(?![\w-])", re.I)
 # A negation earlier in the same clause ("don't deploy to prod", "không deploy live").
@@ -555,6 +556,9 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
             succeeded.append((n, act, target.lower()))
         if act in GATED_ACTIONS and not ac["gates_ok"]:
             errors.append(f"{label}: released before the gates passed (gates_ok false when it ran)")
+        if act in OUTWARD_ACTIONS and kind not in NEEDS_AC:
+            errors.append(f"{label}: a {kind} run can't release; push, PR, merge, tag and deploy belong to "
+                          f"{'/'.join(sorted(NEEDS_AC))} runs")
         at = _ts(ac.get("at"))
         match = [au for au in auths if au["action"] == act
                  and (not _text(au.get("target")) or _text(au.get("target")).lower() == target.lower())
@@ -840,9 +844,18 @@ def profile_production(raw_data: str, target: str) -> bool | None:
     return None
 
 
+def kind_blocker(led: dict) -> str | None:
+    kind = led.get("kind", "build") if isinstance(led, dict) else None
+    if not isinstance(kind, str) or kind not in NEEDS_AC:
+        return (f"a {kind} run can't release; push, PR, merge, tag and deploy belong to "
+                f"{'/'.join(sorted(NEEDS_AC))} runs")
+    return None
+
+
 def cmd_ready(a) -> int:
     p = resolve(a.path)
-    blockers = release_blockers(load(p))
+    led = load(p)
+    blockers = release_blockers(led) + [b for b in [kind_blocker(led)] if b]
     if blockers:
         print(f"NOT READY: {len(blockers)} thing(s) block a release step in {p}")
         for b in blockers:
@@ -860,6 +873,9 @@ def cmd_act(a) -> int:
 
     def change(led):
         actions = ledger_list(led, "actions")
+        wrong_kind = kind_blocker(led)
+        if a.action in OUTWARD_ACTIONS and wrong_kind and not a.force_record:
+            refuse(f"{a.action} refused: {wrong_kind}. Start a ship run for the release")
         blockers = release_blockers(led)
         ok = not blockers
         if a.action in GATED_ACTIONS and not ok and not a.force_record:

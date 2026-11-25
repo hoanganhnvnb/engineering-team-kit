@@ -153,7 +153,8 @@ what is missing. `run check` is different: it only says the ledger is consistent
 in-progress run with G3 FAIL is consistent. `act` computes `gates_ok` the same way and refuses
 (exit 2, nothing recorded) a commit/push/pr/merge/tag/deploy while `ready` would fail, unless
 `--force-record` is given to record a step that already happened (stored with `gates_ok:
-false`). With `--data`, `act --action deploy --target T` looks `T` up in the profile's
+false`). Only build, fix, improve-ui and ship runs may push, open a PR, merge, tag or
+deploy: on a review or test run `ready` fails and `act` refuses those actions. With `--data`, `act --action deploy --target T` looks `T` up in the profile's
 `deploy.targets` and records `production: true` when the profile says so; the profile can
 add the flag, not remove it.
 
@@ -162,6 +163,7 @@ add the flag, not remove it.
   a target covers any target; one granted after the action covers nothing);
 - a commit/push/pr/merge/tag/deploy with `gates_ok: false`: released before the gates passed
   (rollback is exempt);
+- a push/pr/merge/tag/deploy recorded on a review or test run;
 - a merge/tag/deploy/rollback authorized only by the profile;
 - a source-profile authorization without `profile_hash` (written by hand, not by `authorize`);
 - a `--production` deploy without an authorization for exactly that target, or whose quote

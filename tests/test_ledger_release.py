@@ -335,6 +335,28 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.assertEqual(self.etk("act", "--action", "commit", "--exit", "0", str(run)).returncode, 0)
         self.assertTrue(self.ledger(run)["actions"][0]["gates_ok"])
 
+    def test_review_and_test_runs_cannot_release(self):
+        for kind, gates in (("review", ("G2", "G6")), ("test", ("G3", "G4"))):
+            run, led = self.init("--kind", kind)
+            led = self.passing(led, g7=False)
+            self.write(run, led)
+            r = self.etk("ready", str(run))
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn(f"a {kind} run can't release", r.stdout)
+            self.etk("authorize", "--action", "push", "--source", "prompt", "--quote", "push it", str(run))
+            before = (run / "gates.json").read_text()
+            for action in ("push", "pr", "merge", "tag", "deploy"):
+                r = self.etk("act", "--action", action, "--exit", "0", str(run))
+                self.assertEqual(r.returncode, 2, (kind, action))
+                self.assertIn("can't release", r.stderr)
+            self.assertEqual((run / "gates.json").read_text(), before)
+            r = self.etk("act", "--action", "push", "--exit", "0", "--force-record", str(run))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn(f"action #1 (push): a {kind} run can't release", self.check(run).stdout)
+        run, led = self.init("--kind", "fix")
+        self.write(run, self.passing(led, g7=False))
+        self.assertEqual(self.etk("ready", str(run)).returncode, 0)
+
     def test_rollback_is_exempt_from_gates_but_needs_user_words(self):
         run, _ = self.init("--kind", "ship")
         self.etk("act", "--action", "rollback", "--target", "prod", "--exit", "0", str(run))
