@@ -960,8 +960,39 @@ WRAPPER_CHDIR = (
     + [("rev", "env -C /tmp tee z", "block")]
 )
 
+# `etk.sh exec GATE --type T -- CMD` runs CMD, so CMD is judged like any other command.
+ETK_EXEC = (
+    [("dev", c, "block") for c in [
+        "etk.sh exec G3 --type test -- git push",
+        "sh scripts/etk.sh exec G3 --type test -- git push",
+        "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh exec G3 --type test -- git push",
+        "python3 scripts/etk_run.py exec G3 --type test -- git push",
+        "python3.12 scripts/etk_run.py exec G3 --type test -- rm -rf /etc/x",
+        "etk.sh exec G3 --type test",
+        "etk.sh exec G3 --type test npm test",
+        "etk.sh exec G3 --type test -- rm -rf ../../../other",
+        "etk.sh exec G3 --type test -- bash -c 'git push'",
+        "etk.sh exec G3 --type test -- kubectl -n prod apply -f x.yml",
+        "timeout 60 etk.sh exec G3 --type test -- git push",
+    ]]
+    + [(r, "etk.sh exec G3 --type test -- npm test", "block") for r in ("rev", "ux", "scout", "tw")]
+    + [("qa", c, "block") for c in [
+        "etk.sh exec G3 --type test -- sed -i s/a/b/ src/a.js",
+        "etk.sh exec G3 --type test -- git checkout main -- src/a.js",
+        "python3 scripts/etk_run.py exec G3 --type test -- cp x tests/existing.test.js",
+    ]]
+    + [(r, c, "allow") for r in ("dev", "qa") for c in [
+        "etk.sh exec G3 --type test -- npm test",
+        "sh scripts/etk.sh exec G3 --type test -- pytest -q",
+        "python3 scripts/etk_run.py exec G3 --type test -- npm test",
+        "etk.sh discover",
+        "etk.sh run latest",
+    ]]
+    + [("rev", "etk.sh run latest", "allow"), ("rev", "etk.sh discover", "allow")]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC)
 
 
 def make_project(base: Path) -> Path:

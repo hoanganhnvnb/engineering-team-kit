@@ -1002,6 +1002,20 @@ def callback_scripts(prog: str, args: list[str]) -> list[str]:
     return out
 
 
+ETK_ENTRYPOINTS = {"etk.sh", "etk_run.py"}
+
+
+def etk_exec_command(words: list[str]) -> list[str] | None:
+    """The command `etk.sh exec GATE --type T -- CMD...` will run, or None if this isn't that."""
+    for k in range(min(2, len(words))):  # etk.sh, or an interpreter running it
+        if os.path.basename(words[k]) in ETK_ENTRYPOINTS and words[k + 1:k + 2] == ["exec"]:
+            rest = words[k + 2:]
+            if "--" not in rest:
+                raise Blocked("`etk exec` without `-- <command>` can't be checked")
+            return rest[rest.index("--") + 1:]
+    return None
+
+
 def check_words(words: list[str], root: str, role: str, depth: int, cur: str | None, seg: Seg | None = None,
                 outputs: list[str] | None = None, created: set | None = None) -> None:
     """Judge one simple command (already stripped of wrappers and shell keywords)."""
@@ -1016,6 +1030,11 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
     if prog == "eval":
         check_bash(" ".join(words[1:]), root, role, depth + 1, cur)
         return
+    inner = etk_exec_command(words)
+    if inner is not None:
+        if read_only:
+            raise Blocked(f"{role} is read-only; it can't run gate commands through `etk exec`")
+        check_words(*program_ex(inner)[:1], root, role, depth + 1, cur)
     if prog == "trap":
         ops = [w for w in words[1:] if w != "--"]
         if ops[:1] not in (["-l"], ["-p"]):
