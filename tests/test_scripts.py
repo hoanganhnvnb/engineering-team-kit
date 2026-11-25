@@ -258,6 +258,17 @@ class LedgerTests(unittest.TestCase):
         self.assertNotEqual(runs[0], runs[1])
         self.assertTrue(all((p / "gates.json").exists() for p in runs))
 
+    def test_render_survives_malformed_acs_and_gates(self):
+        run, ledger = self.init()
+        for ledger_edit in ({"acceptance_criteria": [7, None, {"text": "ok"}], "gates": {"G1": "oops", "G2": None, "G3": {"commands": "x", "evidence": 5}}},
+                            {"acceptance_criteria": "not a list", "gates": ["x"], "findings": "nope"},
+                            {"acceptance_criteria": 5, "gates": None}):
+            self.write(run, {**ledger, **ledger_edit})
+            r = sh([sys.executable, str(ETK), "render", str(run)], self.dir)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+            self.assertIn("Ledger check: FAILED", r.stdout)
+
     def test_malformed_ledger_gives_messages_not_tracebacks(self):
         run, ledger = self.init()
         ledger = self.complete_ledger(ledger)

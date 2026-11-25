@@ -345,23 +345,29 @@ def cmd_render(a) -> int:
     errors, _ = validate(led)
     print(f"**Task:** {led.get('task')}  \n**Mode:** {led.get('mode')} · **Kind:** {led.get('kind')} · "
           f"**Cycles:** {led.get('cycles')}/{led.get('max_cycles')} · **Outcome:** {led.get('outcome')}\n")
-    if led.get("acceptance_criteria"):
+    acs = led.get("acceptance_criteria")
+    if isinstance(acs, list) and acs:
         print("**Acceptance criteria**")
-        for i, ac in enumerate(led["acceptance_criteria"], 1):
-            text = ac if isinstance(ac, str) else f"{ac.get('id', '')} {ac.get('text')}: {ac.get('status', '?')}".strip()
+        for i, ac in enumerate(acs, 1):
+            if isinstance(ac, dict):
+                text = f"{ac.get('id', '')} {ac.get('text')}: {ac.get('status', '?')}".strip()
+            else:
+                text = str(ac)
             print(f"{i}. {text}")
         print()
     print("| Gate | Status | Evidence |\n|---|---|---|")
+    gates = led.get("gates") if isinstance(led.get("gates"), dict) else {}
     for g, name in GATES.items():
-        gate = led.get("gates", {}).get(g, {})
-        ev = " ".join((gate.get("evidence") or "—").split())
-        cmds = "; ".join(f"`{c.get('cmd')}`→{c.get('exit_code')}" for c in gate.get("commands") or [] if isinstance(c, dict))
+        gate = gates.get(g) if isinstance(gates.get(g), dict) else {}
+        ev = " ".join(str(gate.get("evidence") or "—").split())
+        cmd_list = gate.get("commands") if isinstance(gate.get("commands"), list) else []
+        cmds = "; ".join(f"`{c.get('cmd')}`→{c.get('exit_code')}" for c in cmd_list if isinstance(c, dict))
         if cmds:
             ev = f"{ev} ({cmds})"
         if gate.get("reason_code"):
             ev = f"[{gate['reason_code']}] {ev}"
         print(f"| {g} {name} | {gate.get('status', '?')} | {ev.replace('|', '/')} |")
-    findings = [f for f in (led.get("findings") or []) if isinstance(f, dict)]
+    findings = [f for f in (led.get("findings") if isinstance(led.get("findings"), list) else []) if isinstance(f, dict)]
     if findings:
         print("\n| ID | Sev | Status | Location | Summary |\n|---|---|---|---|---|")
         order = {s: i for i, s in enumerate(SEVERITIES)}
