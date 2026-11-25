@@ -135,6 +135,10 @@ def substitutions(cmd: str) -> list[str]:
     return out
 
 
+class Quoted(str):
+    """A word that had quotes or escapes in the source (so `'{'` is not a brace group)."""
+
+
 class Tok:
     __slots__ = ("kind", "text", "subs", "quoted", "body")
 
@@ -345,7 +349,7 @@ def parse(text: str) -> list:
         if tok.kind == "w":
             cur.subs.extend(tok.subs)
             if want is None:
-                cur.words.append(tok.text)
+                cur.words.append(Quoted(tok.text) if tok.quoted else tok.text)
                 continue
             if want in {"<<", "<<-"}:
                 cur.heredocs.append((tok.body or "", not tok.quoted))
@@ -380,15 +384,25 @@ def known_wrapper_option(base: str, opt: str) -> bool:
     return len(opt) > 2 and all(f"-{c}" in flags for c in opt[1:])
 
 
-def program(words: list[str]) -> list[str]:
-    """Skip shell keywords, env assignments and wrappers like sudo/timeout to see the real program."""
+def program_ex(words: list[str]) -> tuple[list[str], list[str]]:
+    """Words of the real command, and files the wrappers themselves write (`time -o FILE`).
+
+    Skip shell keywords, env assignments and wrappers like sudo/timeout to see the real program."""
     words = list(words)
+    outputs: list[str] = []
     i = 0
     while i < len(words):
         w = words[i]
         base = os.path.basename(w)
-        if w == "coproc" and "{" in words[i + 1:i + 3]:
-            i = words.index("{", i) + 1  # `coproc { ...; }` or `coproc NAME { ...; }`
+        if w == "coproc":
+            ahead = words[i + 1:i + 3]
+            brace = next((n for n, x in enumerate(ahead) if x == "{" and not isinstance(x, Quoted)), None)
+            if brace == 0 or (brace == 1 and re.match(r"^[A-Za-z_]\w*$", ahead[0]) and not isinstance(ahead[0], Quoted)):
+                i += brace + 2  # `coproc { ...; }` or `coproc NAME { ...; }`
+            elif "{" in ahead:
+                raise Blocked("`coproc` with a quoted brace or an odd name can't be checked")
+            else:
+                i += 1
         elif w in SHELL_KEYWORDS or re.match(r"^\w+=", w):
             i += 1
         elif w == "function" and i + 1 < len(words):
@@ -407,13 +421,19 @@ def program(words: list[str]) -> list[str]:
                         if i >= len(words):
                             raise Blocked("`env -S` without a value can't be checked")
                         value, i = words[i], i + 1
-                    if "${" in value or re.search(r"\\[^\"'$#\\]", value):
-                        raise Blocked("`env -S` value uses env's own escapes or expansions; can't be checked")
+                    if "\\" in value or "${" in value or re.search(r"(^|\s)#", value):
+                        raise Blocked("`env -S` value uses env's own escapes, comments or expansions; can't be checked")
                     try:
                         words[i:i] = shlex.split(value)
                     except ValueError:
                         raise Blocked("`env -S` value can't be parsed")
                     continue
+                if base == "time" and (opt in {"-o", "--output"} and i < len(words)):
+                    outputs.append(words[i])
+                elif base == "time" and opt.startswith("--output="):
+                    outputs.append(opt.split("=", 1)[1])
+                elif base == "time" and opt.startswith("-o") and len(opt) > 2:
+                    outputs.append(opt[2:])
                 if not known_wrapper_option(base, opt):
                     raise Blocked(f"`{base} {opt}` is an option the guard doesn't know; can't tell what it runs")
                 if opt in takes_arg and i < len(words):
@@ -421,7 +441,11 @@ def program(words: list[str]) -> list[str]:
             i += WRAPPER_POSITIONALS.get(base, 0)
         else:
             break
-    return words[i:]
+    return words[i:], outputs
+
+
+def program(words: list[str]) -> list[str]:
+    return program_ex(words)[0]
 
 
 def redirect_targets(redirs: list[tuple[str, str]]) -> list[str]:
@@ -709,25 +733,6 @@ def check_find(args: list[str], root: str, role: str, depth: int, cur: str | Non
             check_words(program([w.replace("{}", r) for w in exprs[j + 1:end]]), root, role, depth + 1, cur)
 
 
-def time_outputs(words: list[str]) -> list[str]:
-    """Files named by `time -o FILE` / `--output=FILE`."""
-    out = []
-    for n, w in enumerate(words):
-        if os.path.basename(w) != "time":
-            continue
-        for j in range(n + 1, len(words)):
-            o = words[j]
-            if not o.startswith("-"):
-                break
-            if o in {"-o", "--output"} and j + 1 < len(words):
-                out.append(words[j + 1])
-            elif o.startswith("--output="):
-                out.append(o.split("=", 1)[1])
-            elif o.startswith("-o") and len(o) > 2:
-                out.append(o[2:])
-    return out
-
-
 def check_write_target(target: str, role: str, root: str, cur: str | None) -> None:
     """A file a redirect (or `time -o`) will write."""
     if is_secret(target):
@@ -756,11 +761,12 @@ def callback_scripts(prog: str, args: list[str]) -> list[str]:
 
 
 def check_words(words: list[str], root: str, role: str, depth: int, cur: str | None, seg: Seg | None = None,
-                raw: list[str] | None = None) -> None:
+                outputs: list[str] | None = None) -> None:
     """Judge one simple command (already stripped of wrappers and shell keywords)."""
     if not words:
         return
     redirs = seg.redirs if seg else []
+    outputs = outputs or []
     read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
     create_only = role == "qa-engineer"
     prog = os.path.basename(words[0])
@@ -795,7 +801,7 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
         check_git(words[1:], root, cur)
     if prog == "rm":
         check_rm(words[1:], root, cur)
-    for target in redirect_targets(redirs) + time_outputs(raw or words):
+    for target in redirect_targets(redirs) + outputs:
         check_write_target(target, role, root, cur)
     if create_only:
         if (prog in SHELL_WRITERS and any(writes_existing(t, root, cur) for t in write_operands(prog, words[1:]))) \
@@ -845,7 +851,7 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             check_bash(body, root, role, depth + 1, cur)
         for body, _ in seg.heredocs:
             check_bash(body, root, role, depth + 1, cur)
-        words = program(seg.words)
+        words, outputs = program_ex(seg.words)
         in_pipe = seg.sep in {"|", "|&"} or seg.after in {"|", "|&", "&"}
         if pending and not in_pipe and seg.sep in {";", "||"}:
             cur, dirs[:], pending = None, ["?"], False
@@ -873,7 +879,7 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             continue
         if not in_pipe and any(os.path.basename(w) in {"cd", "pushd", "popd"} for w in words[1:]):
             cur = None  # a cd we can't attribute (find -exec cd, xargs cd): stay strict
-        check_words(words, root, role, depth, cur, seg, seg.words)
+        check_words(words, root, role, depth, cur, seg, outputs)
         if words and os.path.basename(words[0]) in {"eval", "source", ".", "trap"} and not in_pipe:
             cur, dirs[:] = None, ["?"]  # whatever it did to the directory isn't visible to us
 

@@ -443,8 +443,29 @@ CD_LATER_AND_BUILTINS = (
     ]]
 )
 
+# time's own options, env -S escapes, and coproc with quoted or odd words.
+WRAPPER_EDGES_2 = (
+    [("dev", c, "block") for c in [
+        "time -f %e -o .env npm test",
+        "time -p -o .env npm test",
+        "time --format x --output=.env npm test",
+        "time --format=x -o.env npm test",
+        "sudo time -o .env npm test",
+        "env -S 'npm test \\n'",
+        "env -S '# git push'",
+        "env -S 'echo hi # git push'",
+        "coproc 'foo bar' { git push; }",
+        "coproc '{' echo hi",
+        "coproc foo '{' git push",
+    ]]
+    + [("rev", c, "block") for c in ["time -f %e -o src/a.js npm test", "time --format x --output=src/a.js npm test"]]
+    + [("qa", "time -f %e -o src/a.js npm test", "block")]
+    + [("dev", c, "allow") for c in ["env -S 'echo a#b'", "time -f %e -o out.txt npm test", "coproc foo { echo hi; }"]]
+    + [("rev", "time -f %e -o /tmp/t npm test", "allow")]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2)
 
 
 def make_project(base: Path) -> Path:
