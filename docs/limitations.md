@@ -72,7 +72,8 @@ Honest list. If one of these bites you, an issue is welcome.
 - **MCP tools are judged by name only.** For the plugin's subagents the guard blocks MCP
   tools whose name contains a write-style word (`push`, `merge`, `create`, `delete`,
   `write`, `update`, `publish`, `deploy` and a few more), and lets browser tools
-  (`mcp__claude-in-chrome__*`, Playwright) through. A tool with a neutral name that
+  (`mcp__claude-in-chrome__*`, Chrome DevTools, Playwright) through. Words that are usually
+  reads, such as `resolve` in context7's `resolve-library-id`, are not on the list. A tool with a neutral name that
   changes things anyway (`mcp__x__run`, `mcp__x__execute`) passes, and so does anything a
   browser tool does on a page (submitting a form on a deploy dashboard). Only permissions
   you set in Claude Code, or leaving the server out of the session, close that gap.

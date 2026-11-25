@@ -1459,10 +1459,10 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
 
 
 # Browser tools act on pages, not on the project; everything else is judged by what its name says it does.
-MCP_BROWSER = re.compile(r"^mcp__(claude-in-chrome|[\w-]*playwright[\w-]*)__")
+MCP_BROWSER = re.compile(r"^mcp__(claude-in-chrome|[\w-]*chrome-devtools[\w-]*|[\w-]*playwright[\w-]*)__")
 MCP_WRITE_VERBS = {"push", "merge", "create", "delete", "write", "update", "publish", "deploy", "remove", "edit",
                    "commit", "upload", "send", "post", "promote", "put", "patch", "insert", "add", "set", "move",
-                   "rename", "resolve", "reopen"}
+                   "rename"}
 
 
 def check_mcp(tool: str) -> None:
