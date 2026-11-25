@@ -387,8 +387,8 @@ def program(words: list[str]) -> list[str]:
     while i < len(words):
         w = words[i]
         base = os.path.basename(w)
-        if w == "coproc" and "{" in words[i:]:
-            i = words.index("{", i) + 1
+        if w == "coproc" and "{" in words[i + 1:i + 3]:
+            i = words.index("{", i) + 1  # `coproc { ...; }` or `coproc NAME { ...; }`
         elif w in SHELL_KEYWORDS or re.match(r"^\w+=", w):
             i += 1
         elif w == "function" and i + 1 < len(words):
@@ -407,6 +407,8 @@ def program(words: list[str]) -> list[str]:
                         if i >= len(words):
                             raise Blocked("`env -S` without a value can't be checked")
                         value, i = words[i], i + 1
+                    if "${" in value or re.search(r"\\[^\"'$#\\]", value):
+                        raise Blocked("`env -S` value uses env's own escapes or expansions; can't be checked")
                     try:
                         words[i:i] = shlex.split(value)
                     except ValueError:
@@ -705,7 +707,38 @@ def check_find(args: list[str], root: str, role: str, depth: int, cur: str | Non
             check_words(program([w.replace("{}", r) for w in exprs[j + 1:end]]), root, role, depth + 1, cur)
 
 
-def check_words(words: list[str], root: str, role: str, depth: int, cur: str | None, seg: Seg | None = None) -> None:
+def time_outputs(words: list[str]) -> list[str]:
+    """Files named by `time -o FILE` / `--output=FILE`."""
+    out = []
+    for n, w in enumerate(words):
+        if os.path.basename(w) != "time":
+            continue
+        for j in range(n + 1, len(words)):
+            o = words[j]
+            if not o.startswith("-"):
+                break
+            if o in {"-o", "--output"} and j + 1 < len(words):
+                out.append(words[j + 1])
+            elif o.startswith("--output="):
+                out.append(o.split("=", 1)[1])
+            elif o.startswith("-o") and len(o) > 2:
+                out.append(o[2:])
+    return out
+
+
+def check_write_target(target: str, role: str, root: str, cur: str | None) -> None:
+    """A file a redirect (or `time -o`) will write."""
+    if is_secret(target):
+        raise Blocked(f"writing to `{target}` (looks like a secrets file)")
+    if role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES:
+        if target not in SAFE_SINKS and not scratch(target, root, cur):
+            raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
+    elif role == "qa-engineer" and target not in SAFE_SINKS and writes_existing(target, root, cur):
+        raise Blocked("qa-engineer may only create new files, not change existing ones")
+
+
+def check_words(words: list[str], root: str, role: str, depth: int, cur: str | None, seg: Seg | None = None,
+                raw: list[str] | None = None) -> None:
     """Judge one simple command (already stripped of wrappers and shell keywords)."""
     if not words:
         return
@@ -735,14 +768,10 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
         check_git(words[1:], root, cur)
     if prog == "rm":
         check_rm(words[1:], root, cur)
-    for target in redirect_targets(redirs):
-        if is_secret(target):
-            raise Blocked(f"writing to `{target}` (looks like a secrets file)")
-        if read_only and target not in SAFE_SINKS and not scratch(target, root, cur):
-            raise Blocked(f"{role} is read-only; it reports findings and the developer changes files")
+    for target in redirect_targets(redirs) + time_outputs(raw or words):
+        check_write_target(target, role, root, cur)
     if create_only:
-        if any(writes_existing(t, root, cur) for t in redirect_targets(redirs)) \
-                or (prog in SHELL_WRITERS and any(writes_existing(t, root, cur) for t in write_operands(prog, words[1:]))) \
+        if (prog in SHELL_WRITERS and any(writes_existing(t, root, cur) for t in write_operands(prog, words[1:]))) \
                 or (prog == "sed" and any(w.startswith("-i") for w in words[1:])):
             raise Blocked("qa-engineer may only create new files, not change existing ones")
     if read_only:
@@ -799,7 +828,7 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             continue
         if not in_pipe and any(os.path.basename(w) in {"cd", "pushd", "popd"} for w in words[1:]):
             cur = None  # a cd we can't attribute (find -exec cd, xargs cd): stay strict
-        check_words(words, root, role, depth, cur, seg)
+        check_words(words, root, role, depth, cur, seg, seg.words)
         if words and os.path.basename(words[0]) in {"eval", "source", "."} and not in_pipe:
             cur, dirs[:] = None, ["?"]  # whatever it did to the directory isn't visible to us
 

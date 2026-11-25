@@ -364,8 +364,42 @@ SHELL_CLUSTERS = (
     ]]
 )
 
+# env -S has its own splitting rules; coproc only skips a NAME before a brace group;
+# time -o writes a file.
+WRAPPER_EDGES = (
+    [("dev", c, "block") for c in [
+        "env -S 'git\\_push'",
+        "env -S 'echo hi\\c git push'",
+        "env -S '${CMD}'",
+        "env -S 'git\\ push'",
+        "coproc foo { git push; }",
+        "coproc { git push; }",
+        "coproc git push {}",
+        "coproc git push '{'",
+        "time -o .env npm test",
+        "time -o.env npm test",
+        "time --output=.env npm test",
+        "time --output .env npm test",
+    ]]
+    + [("rev", c, "block") for c in [
+        "time -o src/a.js npm test",
+        "time --output=src/a.js npm test",
+        "time -osrc/a.js npm test",
+    ]]
+    + [("qa", c, "block") for c in ["time -o src/a.js npm test", "time --output=tests/existing.test.js npm test"]]
+    + [("dev", c, "allow") for c in [
+        "env -S 'echo \"a b\"'",
+        "env -S 'npm test'",
+        "coproc { echo hi; }",
+        "coproc foo { echo hi; }",
+        "time -o out.txt npm test",
+    ]]
+    + [("rev", "time -o /tmp/t npm test", "allow"), ("qa", "time -o tests/new.txt npm test", "allow"),
+       ("qa", "npm test > /dev/null", "allow")]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES)
 
 
 def make_project(base: Path) -> Path:
