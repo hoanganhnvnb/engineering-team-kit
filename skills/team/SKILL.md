@@ -60,6 +60,12 @@ Record each phase change with `etk.sh run phase <name> RUN`. `RUN` is the direct
    - List the assumptions you made on your own and every action you took, with its
      ref or URL.
 
+## Always a ledger
+
+Even for a one-line fix, run `run init` first and `run check RUN` before the commit. A
+commit or push without a ledger that passes `run check` is not allowed, and a report
+that says the ledger was skipped means the run did not follow this skill.
+
 ## Stop conditions
 
 On INCOMPLETE, BLOCKED, the cycle cap, a failed hook, failed CI or a failed deploy:
