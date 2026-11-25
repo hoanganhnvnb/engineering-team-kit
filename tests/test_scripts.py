@@ -241,6 +241,23 @@ class LedgerTests(unittest.TestCase):
         self.assertIn("| R1-001 | high | invalid |", out)
         self.assertIn("test_zero passes", out)
 
+    def test_two_inits_in_the_same_second_get_separate_runs(self):
+        stub = self.dir / "freeze.py"
+        stub.write_text("import datetime as dt, sys, runpy\n"
+                        "class D(dt.datetime):\n"
+                        "    @classmethod\n"
+                        "    def now(cls, tz=None): return cls(2026, 1, 2, 3, 4, 5)\n"
+                        "dt.datetime = D\n"
+                        f"sys.argv = [{str(ETK)!r}] + sys.argv[1:]\n"
+                        f"runpy.run_path({str(ETK)!r}, run_name='__main__')\n")
+        runs = []
+        for _ in range(2):
+            r = sh([sys.executable, str(stub), "init", "Same task"], self.dir)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            runs.append(Path(r.stdout.strip()))
+        self.assertNotEqual(runs[0], runs[1])
+        self.assertTrue(all((p / "gates.json").exists() for p in runs))
+
     def test_malformed_ledger_gives_messages_not_tracebacks(self):
         run, ledger = self.init()
         ledger = self.complete_ledger(ledger)

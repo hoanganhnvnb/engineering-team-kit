@@ -115,7 +115,15 @@ def cmd_init(a) -> int:
         a.max_cycles = project_config(root).get("max_cycles", 3)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     run = runs_dir() / f"{stamp}-{slug(a.task)}"
-    run.mkdir(parents=True, exist_ok=False)
+    runs_dir().mkdir(parents=True, exist_ok=True)
+    for n in range(2, 100):
+        try:
+            run.mkdir()
+            break
+        except FileExistsError:
+            run = runs_dir() / f"{stamp}-{slug(a.task)}-{n}"
+    else:
+        sys.exit(f"could not create a run directory under {runs_dir()}")
     exclude_from_git(root)
     ledger = {
         "task": a.task,
