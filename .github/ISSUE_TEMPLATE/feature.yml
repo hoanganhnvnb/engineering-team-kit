@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest a change to a workflow, agent, gate or the guard.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you were trying to do and what got in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you'd like the plugin to do. Mention the token cost if it adds prompt text.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered

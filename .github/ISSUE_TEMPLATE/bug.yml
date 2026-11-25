@@ -1,0 +1,31 @@
+name: Bug report
+description: Something in the plugin did the wrong thing.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command or request you gave, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Minimal steps. A small public repo or fixture helps a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: The relevant part of the report, `etk.sh run check <run dir>` output, or guard message. Remove secrets.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Plugin version, `claude --version`, `python3 --version`, OS.
+    validations:
+      required: true
