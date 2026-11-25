@@ -76,6 +76,16 @@ Honest list. If one of these bites you, an issue is welcome.
   changes things anyway (`mcp__x__run`, `mcp__x__execute`) passes, and so does anything a
   browser tool does on a page (submitting a form on a deploy dashboard). Only permissions
   you set in Claude Code, or leaving the server out of the session, close that gap.
+- **Known gaps in the guard** (found in review, not fixed):
+  - `protected_paths` is matched against the paths a command names, so an operation on an
+    ancestor (`rm -rf .`, moving a parent directory) isn't caught, and the match is
+    case-sensitive (`LICENSE` doesn't protect `license` on a case-insensitive filesystem).
+  - A shell script created earlier in the command through a symlinked parent directory isn't
+    recognised as "created in this command".
+  - `cp`/`mv` into a directory (`cp .env somedir/`) isn't resolved to the file it creates, so
+    the secret-file check misses it when the destination is only a directory.
+  - `gh api` and npm option spellings beyond the common ones (abbreviated or unusual
+    forms) can slip past the publish/merge checks.
 - **It judges the filesystem as it is before the command runs.** A script created earlier
   in the same command line (`ln -s /dev/stdin x && bash x`) is blocked when the guard can
   see it being created. A script or link made by an earlier tool call, or by a program the
