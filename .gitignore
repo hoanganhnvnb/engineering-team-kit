@@ -5,3 +5,4 @@ __pycache__/
 node_modules/
 tests/e2e/results/
 evals/results/
+internal/*
