@@ -572,7 +572,10 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
                 errors.append(f"{label}: needs the user's own words (authorization source prompt or answer), "
                               "a workflow profile is not enough")
                 continue
-        if act in {"deploy", "rollback"} and ac["production"]:
+        if act in {"deploy", "rollback"} and not target:
+            errors.append(f"{label}: a {act} needs its target's name")
+            continue
+        if act in {"deploy", "rollback"} and (ac.get("production") or PROD_WORDS.search(target)):
             named = [au for au in match if target and _text(au.get("target")).lower() == target.lower()]
             if not named:
                 errors.append(f"{label}: production {act} needs an authorization for exactly this target "
@@ -866,7 +869,10 @@ def cmd_act(a) -> int:
     if a.action in {"deploy", "rollback"} and not a.data:
         refuse(f"act --action {a.action} needs --data DIR (the plugin data dir) so the profile can say "
                "whether the target is production")
-    if a.data and a.action in {"deploy", "rollback"} and a.target.strip():
+    if a.action in {"deploy", "rollback"}:
+        target = (a.target or "").strip()
+        if not target:
+            refuse(f"act --action {a.action} needs --target, the deploy target's name in the profile")
         # The profile knows which targets are production; it can only add the flag, never drop it.
         production = profile_production(a.data, a.target.strip()) or production
 

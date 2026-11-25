@@ -347,7 +347,8 @@ class ReleaseLedgerTests(unittest.TestCase):
             self.etk("authorize", "--action", "push", "--source", "prompt", "--quote", "push it", str(run))
             before = (run / "gates.json").read_text()
             for action in ("push", "pr", "merge", "tag", "deploy"):
-                r = self.etk("act", "--action", action, "--exit", "0", "--data", str(self.data), str(run))
+                r = self.etk("act", "--action", action, "--target", "prod", "--exit", "0", "--data", str(self.data),
+                             str(run))
                 self.assertEqual(r.returncode, 2, (kind, action))
                 self.assertIn("can't release", r.stderr)
             self.assertEqual((run / "gates.json").read_text(), before)
@@ -367,12 +368,24 @@ class ReleaseLedgerTests(unittest.TestCase):
         out = self.check(run).stdout
         self.assertNotIn("released before the gates passed", out)
         self.assertIn("profile can only authorize", out)
-        self.etk("authorize", "--action", "rollback", "--source", "answer", "--quote", "yes roll back", str(run))
+        self.etk("authorize", "--action", "rollback", "--target", "prod", "--source", "answer", "--quote",
+                 "yes roll back prod", str(run))
         led = self.ledger(run)
         led["authorizations"].pop(0)
         led["actions"][0]["at"] = led["authorizations"][0]["granted_at"]
         self.write(run, led)
         self.assertEqual(self.check(run).returncode, 0, self.check(run).stdout)
+
+    def test_production_needs_a_named_listed_target(self):
+        run, _ = self.init("--kind", "ship")
+        data = ("--data", str(self.data))
+        r = self.etk("act", "--action", "deploy", "--exit", "0", *data, str(run))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("needs --target", r.stderr)
+        r = self.etk("act", "--action", "deploy", "--target", "web-eu", "--exit", "0", "--force-record", *data, str(run))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not a deploy target", r.stderr)
+        self.assertEqual(self.ledger(run).get("actions", []), [])
 
     def test_hand_edited_profile_needs_a_new_confirm(self):
         run, _ = self.init("--kind", "ship")
