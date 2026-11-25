@@ -18,12 +18,11 @@ It's built for solo developers and small teams: most tasks stay small and
 cheap, and the process scales up only when the change does. Installed, it adds about
 600 tokens to a session; the workflows load only when you run a command.
 
-[Tiếng Việt](docs/README.vi.md)
-
 ## Commands
 
 | Command | What it does |
 |---|---|
+| `/engineering-team:team <task>` (or just ask) | Whole task end to end: implement → review → test/fix until pass → commit, push, PR, deploy as your [workflow profile](docs/workflow.md) and your words allow |
 | `/engineering-team:build <feature>` | Full loop: understand → plan → implement → review → fix → test → gates → report |
 | `/engineering-team:fix <bug>` | Reproduce with a failing test first, fix the root cause, prove no regression |
 | `/engineering-team:review [ref\|PR\|path] [--fix]` | Independent read-only review with verified findings; `--fix` runs the fix loop |
@@ -32,6 +31,10 @@ cheap, and the process scales up only when the change does. Installed, it adds a
 | `/engineering-team:retro [last N]` | Look back over past runs: recurring findings, trust trend, and the 1–3 hard checks worth adding |
 
 You don't call the developer, reviewer, or QA yourself during a normal build. The Lead does.
+`team` is the only one Claude may start on its own, for plain requests such as
+"fix bug X, review pass thì commit push, deploy staging luôn". Agents follow a compact
+[conventions pack](docs/conventions.md) (commits, naming, style, API, DB, versioning…)
+unless your project says otherwise.
 
 ## Install
 

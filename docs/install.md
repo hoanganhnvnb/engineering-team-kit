@@ -79,6 +79,17 @@ claude plugin marketplace update engineering-team-kit
 claude plugin update engineering-team@engineering-team-kit
 ```
 
+**To 0.4.0.**
+- From 0.2.x you also get 0.3.0's floor: Python 3.12+.
+- The default branch of this repo is now `master` (was `main`). If
+  `marketplace update` fails, remove the marketplace and add it again
+  (`claude plugin marketplace remove engineering-team-kit`, then the `add` above).
+- New: the `team` skill, a per-developer workflow profile (kept in the plugin's data
+  folder, never in your repo) and the conventions pack. Nothing changes in your repo
+  until you run a task. Commit, push, PR and deploy happen only as your profile and
+  your own words allow.
+- To stay on the old behaviour, pin `#v0.3.0`.
+
 Restart the session. Read `CHANGELOG.md` for what changed. Breaking changes to the
 ledger format or command names will only come with a minor-version bump before 1.0
 and a major bump after.

@@ -6,8 +6,9 @@
 .claude-plugin/
   plugin.json          name "engineering-team" → commands are /engineering-team:<skill>
   marketplace.json     this repo is its own marketplace (source "./")
-skills/                user-invoked commands; the main session runs them as Lead
-  build/ fix/ review/ test/ improve-ui/ retro/
+skills/                commands; the main session runs them as Lead
+  team/                the one model-invocable skill: implement → review/test → release → deploy
+  build/ fix/ review/ test/ improve-ui/ retro/   user-only step commands
 agents/                subagents the Lead spawns as engineering-team:<name>
   scout.md             haiku; read-only fact gathering and run-data export
   developer.md         session model; full tools except Agent
@@ -17,11 +18,14 @@ agents/                subagents the Lead spawns as engineering-team:<name>
   tech-writer.md       opus; Markdown only, verifies every claim against the code
 workflows/             reference docs the Lead reads at the step that needs them
   discovery.md routing.md briefs.md review-loop.md parallel.md project-memory.md
+  decisions.md (when to ask) profile.md (onboarding) ship.md (commit/push/PR/deploy)
+conventions/           agent rules: index + 10 topics, read on demand (see docs/conventions.md)
 quality/
   gates.md findings.md hardening.md report-template.md
 scripts/
   discover.py          project snapshot (incl. hard checks, path rules), injected into every command
-  etk_run.py           ledger: init / check / render / stats / latest
+  etk_run.py           ledger: init / check / render / stats / latest / phase / authorize / act / decide
+  etk_profile.py       per-developer workflow profile in ${CLAUDE_PLUGIN_DATA} (never in the repo)
 hooks/
   hooks.json           PreToolUse → run-guard.sh (exits at once unless the caller is an ETK agent)
   guard.py             parses each command segment; blocks push/deploy/discarding work/secrets,
@@ -30,6 +34,9 @@ templates/             project config + docs/agent templates (incl. FEATURES, LE
 evals/                 `claude plugin eval` cases: behaviour tests for the skills
 tests/                 unit + structure tests, fixtures, e2e runner
 ```
+
+Subagents never see the skill text or this conversation. Whatever they must obey is in
+their agent file or in the brief the Lead writes, never only in a skill.
 
 ## Why these mechanisms
 

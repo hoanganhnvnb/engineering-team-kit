@@ -3,6 +3,49 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
+## 0.4.0
+
+- **Behaviour change: the Lead can now ship.**
+  - New `team` skill runs a task end to end: implement, review, test and fix until it
+    passes, then commit, push, open a PR or merge, and deploy.
+  - Commit, push and PR happen when your workflow profile says `auto` or you ask.
+  - Merge, tag, deploy and rollback need your own words in the conversation. Production
+    must be named.
+  - Subagents still never push or deploy.
+  - The six step commands work as before. `build` and `fix` continue into the ship flow
+    only when you asked for it, or when your profile says auto.
+- **Workflow profile**, one per developer and project (`etk.sh profile`).
+  - Stored in the plugin's data folder, outside the repo, so it is never committed.
+  - Detects git/SVN, host and CLI, default branch, commit style and language, commit
+    tooling, and deploy candidates. Asks only for what it can't detect.
+  - Settings in the repo can't grant push, merge or deploy.
+- **Run ledger.**
+  - New run kind `ship` and gate G7 (release).
+  - New `run phase`, `run authorize`, `run act` and `run decide`.
+  - `check` fails on a release action without a matching permission, one taken before
+    the gates passed, a merge or deploy allowed only by the profile, or a production
+    deploy you didn't name.
+- **Conventions pack** (`conventions/`): commits, naming, style, API, database,
+  versioning, testing and errors, security, docs and review, and UI.
+  - Read on demand, under a size budget.
+  - Project rules win.
+  - `conventions.disable` / `conventions.extra` in the project config.
+- **Decision policy** (`workflows/decisions.md`): the Lead asks rarely, in batches, with
+  a recommendation. Agents can't call AskUserQuestion; they report to the Lead.
+- **Reviewer and scout.**
+  - The reviewer fails closed (`COULD_NOT_REVIEW`), lists what it didn't check, and
+    ignores wording that leans toward a verdict.
+  - The scout tries several naming styles before reporting "not found".
+- **Security fixes from an audit.**
+  - The guard now sees every tool: `Monitor` commands get the Bash checks, and unknown
+    tools are blocked for our agents.
+  - Ledger commands only act on runs this session could have created: no committed,
+    symlinked or future-dated runs.
+  - Subagents can't write the profile or `.etk/` run records.
+  - The snapshot runs git without fsmonitor or hooks and trims repo-supplied strings.
+- This repo's default branch is now `master`. See docs/install.md if
+  `marketplace update` fails.
+
 ## 0.3.0
 
 - **Breaking: Python 3.12 or newer is required.** `etk.sh`, the guard wrapper and

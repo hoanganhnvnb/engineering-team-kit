@@ -32,6 +32,15 @@ Running log of building ETK itself. Newest state at the top of each phase.
 | 16. Independent review fixes | done | Ledger: `invalid` finding status, report-only reviews may finish with open mediums, no crash on same-second `init` or malformed `render` input; `discover.py` no longer hides skills named `build`/`test`; reviewer ID prefixes; `etk.sh exec` records real exit codes; portable `evals/run.sh`; skill wording aligned with routing and gates. |
 | 17. Python 3.12+ | done | Minimum Python raised to 3.12: launchers pick a 3.12+ interpreter, CI runs 3.12 on Linux and macOS, docs updated. |
 
+### 0.4.0: end-to-end workflow, profile, conventions
+
+| Phase | Status | Notes |
+|---|---|---|
+| 18. Security audit | done | Quick-profile audit (sandboxed, source and local only). Two confirmed findings were fixed: the guard ignored shell-capable tools outside its matcher (Monitor) (medium), and no-path ledger commands could pick a run committed by the repo (low). |
+| 19. Workflow profile | done | `etk.sh profile`: per developer and project, in the plugin data dir; detects VCS/host/branches/commit style; onboarding asks only what's missing. |
+| 20. Orchestration | done | `team` skill; ledger phases, permissions quoted from the user, release actions, G7; `check` rejects unauthorized or premature release steps. Decision policy for when to ask. |
+| 21. Conventions pack | done | Index + 10 topics under a size budget, reviewed for accuracy; reviewer fail-closed and neutral briefs, scout search discipline (ideas from an internal agent set). |
+
 ## Decisions made along the way
 
 - **`disable-model-invocation: true` on all six step skills.** Team workflows cost real
