@@ -32,6 +32,8 @@ Session chính sẽ đóng vai **Lead** và làm lần lượt các việc sau:
 
 ## Cài đặt
 
+Yêu cầu: Claude Code có hỗ trợ plugin và Python 3.12 trở lên (`python3`, `python3.12` hoặc `python3.13` trong `PATH`). Đây là thay đổi không tương thích ngược từ 0.3.0: thiếu Python phù hợp thì guard sẽ chặn các subagent của plugin.
+
 ```bash
 claude plugin marketplace add hoanganhnvnb/engineering-team-kit
 claude plugin install engineering-team@engineering-team-kit

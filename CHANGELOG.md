@@ -20,7 +20,10 @@ All notable changes to this plugin. Versions follow semver; the version in
 - Ledger: new `invalid` finding status (needs a `resolution`); a report-only review can finish
   `COMPLETE` with open mediums; `etk.sh exec <gate> --type test -- <cmd>` runs a command and records
   its real exit code, and `check` warns about G3/G4 passes recorded any other way. `exec` is not
-  pre-approved by any skill and is only as guarded as the guard's wrapper handling.
+  pre-approved by any skill. The guard judges the command after `--` like any other command, and
+  read-only roles can't use `exec`.
+- `scripts/selftest.sh` runs the tests with the first Python 3.12+ it finds (same list as
+  `etk.sh`) and says so if there is none.
 - Fixes: two `init` runs in the same second no longer crash; `render` copes with malformed
   criteria and gates; the project snapshot no longer hides skills named `build` or `test`;
   parallel reviewers get distinct finding ID prefixes; review and improve-ui wording matches the

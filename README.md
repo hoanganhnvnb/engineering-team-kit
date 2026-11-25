@@ -35,7 +35,7 @@ You don't call the developer, reviewer, or QA yourself during a normal build. Th
 
 ## Install
 
-Requires Claude Code with plugin support (built and tested on 2.1.329) and `python3` (3.12+).
+Requires Claude Code with plugin support (built and tested on 2.1.329) and Python 3.12+ (`python3`, `python3.12` or `python3.13` on `PATH`).
 
 ```bash
 claude plugin marketplace add hoanganhnvnb/engineering-team-kit
