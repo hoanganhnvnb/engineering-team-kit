@@ -16,7 +16,8 @@ Classify every open decision once:
 | L3 blocking | one workstream can't go on without it | pause that stream only; keep doing independent work |
 | L4 critical | see list below | stop that action until the user authorizes it |
 
-**L4 always:** merge, deploy, rollback, force-push or any history rewrite, pushing to a
+**L4 always:** merge, deploy, rollback, any history rewrite (the Lead never force-pushes; the user does that
+themselves), pushing to a
 protected or default branch when the profile isn't trunk-based, changing the agreed
 scope, deleting data or files the run didn't create. Confidence never lowers a level.
 
