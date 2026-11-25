@@ -356,6 +356,11 @@ def cmd_exec(a) -> int:
     except OSError as exc:
         last, rc = f"could not start: {exc}", 127
         print(last, file=sys.stderr)
+    led = load(p)  # the command may have recorded into this ledger itself (nested exec); don't overwrite that
+    gate = led.get("gates", {}).get(a.gate) if isinstance(led.get("gates"), dict) else None
+    if not isinstance(gate, dict) or not isinstance(gate.get("commands", []), list):
+        print(f"{p}: gate {a.gate} became malformed while the command ran; nothing recorded", file=sys.stderr)
+        return 2
     gate.setdefault("commands", []).append({
         "cmd": shlex.join(cmd), "type": a.type, "exit_code": rc, "last_line": last[:300], "recorded_by": "exec",
     })

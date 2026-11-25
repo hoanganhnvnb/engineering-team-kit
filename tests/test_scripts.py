@@ -273,6 +273,16 @@ class LedgerTests(unittest.TestCase):
     def exec_cmd(self, run, *args):
         return sh([sys.executable, str(ETK), "exec", *args], self.dir)
 
+    def test_nested_exec_keeps_the_inner_record(self):
+        run, _ = self.init()
+        inner = ("import subprocess, sys; subprocess.run([sys.executable, %r, 'exec', 'G4', '--type', 'test', "
+                 "'--run', %r, '--', 'true'], check=True)" % (str(ETK), str(run)))
+        r = self.exec_cmd(run, "G3", "--type", "test", "--run", str(run), "--", sys.executable, "-c", inner)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        gates = json.loads((run / "gates.json").read_text())["gates"]
+        self.assertEqual([c["cmd"] for c in gates["G4"]["commands"]], ["true"])
+        self.assertEqual(len(gates["G3"]["commands"]), 1)
+
     def test_exec_records_the_real_exit_code_and_last_line(self):
         run, _ = self.init()
         r = self.exec_cmd(run, "G3", "--type", "test", "--run", str(run), "--", sys.executable, "-c",
