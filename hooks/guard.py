@@ -1125,10 +1125,20 @@ def in_tool_home(path: str, cur: str | None) -> bool:
     on_path = {d for d in on_path if d.startswith(h + os.sep)}
     cands = [full]
     if re.search(r"[*?\[]", full):  # the shell expands these; look at every file they could name
-        found = list(itertools.islice(glob.iglob(full), GLOB_CAP + 1))
-        if len(found) > GLOB_CAP:
-            return True  # too many to judge: block rather than guess
-        cands += found
+        parts = os.path.normpath(full).split(os.sep)
+        wild = [i for i, c in enumerate(parts) if re.search(r"[*?\[]", c)]
+        prefix = os.sep.join(parts[:wild[0]]).lower() or os.sep
+        guarded = whole + [os.path.join(h, f) for f in TOOL_HOME_FILES] + sorted(on_path)
+        # Only a pattern that can reach a guarded folder needs expanding. Those with `**` or more than
+        # two wildcard parts could walk a huge tree inside the hook's time limit: block them.
+        if any(g == prefix or g.startswith(prefix.rstrip(os.sep) + os.sep) or prefix.startswith(g + os.sep)
+               for g in guarded):
+            if "**" in full or len(wild) > 2:
+                return True
+            found = list(itertools.islice(glob.iglob(full), GLOB_CAP + 1))
+            if len(found) > GLOB_CAP:
+                return True  # too many to judge: block rather than guess
+            cands += found
     for cand in cands:
         real = os.path.realpath(cand).lower()
         if any(real == w or real.startswith(w + os.sep) for w in whole) or real in {

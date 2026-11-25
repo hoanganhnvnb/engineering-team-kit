@@ -1430,13 +1430,21 @@ class GuardCorpus(unittest.TestCase):
                                 "agent_type": ROLES["dev"]}
                         self.assertIsNotNone(guard.decide(data))
             # a pattern that matches more than the cap is blocked rather than guessed at
-            (home / "many").mkdir()
+            (home / ".local" / "bin").mkdir(parents=True)
             for i in range(guard.GLOB_CAP + 2):
-                (home / "many" / f"f{i}").write_text("")
+                (home / ".local" / "bin" / f"py{i}").write_text("")
             with mock.patch.dict(os.environ, {"HOME": str(home)}):
-                data = {"tool_name": "Bash", "tool_input": {"command": f"echo x > {home}/many/f*"},
+                data = {"tool_name": "Bash", "tool_input": {"command": f"echo x > {home}/.local/bin/py*"},
                         "cwd": str(self.project), "agent_type": ROLES["dev"]}
-                self.assertIn("settings", guard.decide(data) or "")
+                self.assertIsNotNone(guard.decide(data))
+                for cmd in (f"echo x > {home}/*/*/*/f", f"echo x > {home}/**/f"):  # could walk the whole home
+                    data["tool_input"]["command"] = cmd
+                    with self.subTest(cmd=cmd):
+                        self.assertIsNotNone(guard.decide(data))
+                for cmd in (f"echo x > {self.project}/src/*/*/f",):  # can't reach a guarded folder: left alone
+                    data["tool_input"]["command"] = cmd
+                    with self.subTest(cmd=cmd):
+                        self.assertIsNone(guard.decide(data))
 
     def test_unexpected_errors_block_etk_agents(self):
         agent = ROLES["dev"]

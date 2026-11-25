@@ -3,6 +3,11 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
+## Unreleased
+
+- Guard: a wildcard pattern is expanded only when it can reach `~/.claude` or a Python folder;
+  `**` or more than two wildcard parts there is blocked, so a pattern can't stall the hook.
+
 ## 0.5.0
 
 - New `/engineering-team:readme`: audits the README against the real repository,
