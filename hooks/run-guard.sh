@@ -17,5 +17,5 @@ for py in python3 python3.13 python3.12 /usr/bin/python3 /usr/local/bin/python3 
     exit 2
   fi
 done
-echo "[engineering-team guard] Python 3.12+ not found; guard inactive for this call" >&2
-exit 0
+echo "[engineering-team guard] Python 3.12+ not found; engineering-team needs Python 3.12+ for its guard; install it or disable the plugin" >&2
+exit 2

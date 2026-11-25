@@ -910,9 +910,16 @@ class LauncherPythonTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("FAKE python3.13", r.stdout)
 
-    def test_guard_wrapper_without_3_12_keeps_failing_open_and_says_why(self):
+    def test_guard_wrapper_without_3_12_blocks_plugin_agents_and_says_why(self):
         self.fake_python("python3", version_ok=False)
-        r = self.run_launcher(self.without_absolute_pythons(ROOT / "hooks" / "run-guard.sh"),
-                              stdin='{"agent_type":"engineering-team:developer"}')
+        script = self.without_absolute_pythons(ROOT / "hooks" / "run-guard.sh")
+        r = self.run_launcher(script, stdin='{"agent_type":"engineering-team:developer"}')
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("needs Python 3.12+ for its guard; install it or disable the plugin", r.stderr)
+
+    def test_guard_wrapper_without_3_12_leaves_the_main_session_alone(self):
+        self.fake_python("python3", version_ok=False)
+        script = self.without_absolute_pythons(ROOT / "hooks" / "run-guard.sh")
+        r = self.run_launcher(script, stdin='{"tool_name":"Bash","tool_input":{"command":"ls"}}')
         self.assertEqual(r.returncode, 0)
-        self.assertIn("Python 3.12+ not found; guard inactive", r.stderr)
+        self.assertEqual(r.stderr, "")

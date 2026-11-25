@@ -88,9 +88,9 @@ Honest list. If one of these bites you, an issue is welcome.
   `python3.13`, `python3.12`, `/usr/bin/python3`, `/usr/local/bin/python3`,
   `/opt/homebrew/bin/python3`, then `python`, skipping any that don't run or are older than
   3.12 (a pyenv/asdf shim without its root, a deleted venv, an old system Python). Without
-  a suitable Python the guard prints "Python 3.12+ not found" and lets the call through
-  (it fails open, so on an older Python the subagents run unguarded), and the snapshot step
-  fails visibly.
+  a suitable Python, calls from the plugin's subagents are blocked with "engineering-team
+  needs Python 3.12+ for its guard; install it or disable the plugin" (the guard fails
+  closed); the main session is unaffected. The snapshot step fails visibly.
 - Inline-code detection for read-only roles (`node -e`, `python -c` writing files) is a
   pattern match on common write calls, not an interpreter. It catches mistakes, not intent.
   Blocking inline code outright wouldn't close the gap (a script in the temp dir runs the
