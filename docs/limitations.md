@@ -72,11 +72,13 @@ Honest list. If one of these bites you, an issue is welcome.
   for a `sh` start per tool call; the wrapper exits before Python runs.
 - **Profile and release records are protected by name, not by a secret.** Subagents can't
   write into the plugin data dir or `.etk/` (or `cd` into them), and can't run `profile set…`
-  or `run init|authorize|act|decide|phase`. They also can't change remotes, URL rewrites,
-  hooks, filters, diff drivers, credentials or includes through `git config`/`git remote`, or
-  write `.git/config` and `.git/hooks/`, because those decide where the Lead pushes. The
-  profile is looked up by the origin URL; its `auto` settings only count in the checkout and
-  for the push URL it was confirmed with. A copy of the scripts, or inline code that builds the
+  or `run init|authorize|act|decide|phase`. They also can't change remotes, branch push
+  targets, URL rewrites, hooks, filters, diff and merge drivers, credentials, includes,
+  aliases, pagers, editors or signing programs through `git config`/`git remote`, or write
+  `.git/config`, `.git/hooks/`, `.git/info/`, `~/.gitconfig` or `~/.config/git/`, because those
+  decide where the Lead pushes or what git runs for it. The profile is looked up by the
+  origin URL; its `auto` settings only count in the checkout and for the push URL it was
+  confirmed with (the URL a plain `git push` on the current branch goes to). A copy of the scripts, or inline code that builds the
   path at runtime, gets past that, like any other guard gap. `run check` still requires
   every release action to match a permission that quotes your words, and the Lead,
   not a subagent, runs every outward step.
