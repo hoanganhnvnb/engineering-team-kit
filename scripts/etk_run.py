@@ -416,7 +416,7 @@ def cmd_render(a) -> int:
                 summary = f"not a real finding: {' '.join(str(f.get('resolution', '')).split())[:90]}"
             summary = summary.replace("|", "/")
             print(f"| {f.get('id')} | {f.get('severity')} | {f.get('status')} | `{f.get('location')}` | {summary} |")
-    hard = [f for f in findings if isinstance(f.get("hardening"), dict)]
+    hard = [f for f in findings if isinstance(f.get("hardening"), dict) and f.get("status") != "invalid"]
     if hard:
         print("\n**Hardening proposals**")
         for f in hard:
@@ -434,7 +434,7 @@ def clean_run(led: dict) -> dict:
     out["gates"] = led.get("gates") if isinstance(led.get("gates"), dict) else {}
     out["findings"] = [{"severity": text(f.get("severity")), "category": text(f.get("category")),
                         "hardening": f.get("hardening") if isinstance(f.get("hardening"), dict) else None}
-                       for f in findings if isinstance(f, dict)]
+                       for f in findings if isinstance(f, dict) and f.get("status") != "invalid"]
     return out
 
 

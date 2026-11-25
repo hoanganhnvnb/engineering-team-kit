@@ -470,6 +470,22 @@ class LedgerTests(unittest.TestCase):
         self.assertNotIn("Traceback", md)
         self.assertIn("Ratchet candidates", sh([sys.executable, str(ETK), "stats"], self.dir).stdout)
 
+    def test_invalid_findings_are_not_counted_or_proposed(self):
+        hard = {"layer": "static", "proposal": "lint rule for N+1"}
+        bogus = self.finding(id="x1", severity="high", category="perf", hardening=hard, status="invalid",
+                             resolution="reviewer misread the diff")
+        self.make_run("20260101-a", [bogus])
+        self.make_run("20260102-b", [dict(bogus, id="x2")])
+        d = json.loads(sh([sys.executable, str(ETK), "stats", "--json"], self.dir).stdout)
+        self.assertEqual(d["findings_by_severity"], {})
+        self.assertEqual(d["trust"]["blocking_per_run"], 0)
+        self.assertEqual(d["ratchet_candidates"], [])
+        self.assertEqual(d["top_categories"], [])
+        run = self.dir / ".etk" / "runs" / "20260101-a"
+        out = sh([sys.executable, str(ETK), "render", str(run)], self.dir).stdout
+        self.assertIn("not a real finding", out)
+        self.assertNotIn("Hardening proposals", out)
+
 
 class GuardTests(unittest.TestCase):
     def call(self, tool, inp, agent="engineering-team:developer", cwd="/work/proj"):
