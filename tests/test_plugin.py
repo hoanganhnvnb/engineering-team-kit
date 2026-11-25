@@ -17,7 +17,7 @@ MARKET = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
 NAME = PLUGIN["name"]
 AGENTS = {p.stem for p in (ROOT / "agents").glob("*.md")}
 SKILLS = {p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md")}
-PROSE = [p for d in ("skills", "agents", "workflows", "quality") for p in (ROOT / d).rglob("*.md")]
+PROSE = [p for d in ("skills", "agents", "workflows", "quality", "conventions") for p in (ROOT / d).rglob("*.md")]
 
 
 def frontmatter(path: Path) -> dict[str, str]:
@@ -28,6 +28,43 @@ def frontmatter(path: Path) -> dict[str, str]:
         k, _, v = line.partition(":")
         out[k.strip()] = v.strip().strip('"')
     return out
+
+
+TOPICS = {"git", "naming", "style", "api", "database", "versioning", "testing-errors", "security",
+          "docs-review", "ui"}
+
+
+class Conventions(unittest.TestCase):
+    """The conventions pack is read into agent context, so it has a hard size budget."""
+
+    def test_topic_files_match_the_index(self):
+        files = {p.stem for p in (ROOT / "conventions").glob("*.md")} - {"README"}
+        self.assertEqual(files, TOPICS)
+        index = (ROOT / "conventions" / "README.md").read_text()
+        for t in TOPICS:
+            self.assertIn(f"`{t}.md`", index, t)
+
+    def test_budgets(self):
+        index = ROOT / "conventions" / "README.md"
+        self.assertLessEqual(len(index.read_text().splitlines()), 40)
+        self.assertLessEqual(index.stat().st_size, 2500)
+        for t in TOPICS:
+            path = ROOT / "conventions" / f"{t}.md"
+            with self.subTest(topic=t):
+                self.assertLessEqual(len(path.read_text().splitlines()), 60)
+                self.assertLessEqual(path.stat().st_size, 4000)
+                self.assertIn("Sources:", path.read_text())
+
+    def test_git_lists_every_commit_type(self):
+        text = (ROOT / "conventions" / "git.md").read_text()
+        for t in ("feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"):
+            self.assertIn(f"`{t}`", text, t)
+
+    def test_topics_only_point_at_existing_topics(self):
+        for path in (ROOT / "conventions").glob("*.md"):
+            for ref in re.findall(r"(?<![\w/.-])([a-z][a-z-]*)\.md\b", path.read_text()):
+                with self.subTest(doc=path.name, ref=ref):
+                    self.assertIn(ref, TOPICS, f"{path.name} → {ref}.md")
 
 
 class PluginStructure(unittest.TestCase):
