@@ -1124,8 +1124,27 @@ ETK_EXEC_FORMS = (
     ]]
 )
 
+# Subcommands outside the diff/log family keep working with their usual options.
+GIT_OTHER_OPTIONS = (
+    [(r, c, "allow") for r in ("rev", "qa") for c in [
+        "git remote -v",
+        "git worktree list --porcelain",
+        "git stash list",
+        "git stash show --stat",
+        "git reflog show --date=iso",
+        "git submodule status --recursive",
+        "git branch --list -a",
+        "git tag -l --sort=-creatordate",
+    ]]
+    + [("qa", c, "allow") for c in ["git add -A tests", "git add -u", "git commit -m 'add tests'", "git commit -am 'x'",
+                                    "git commit -q --allow-empty -m x", "git worktree add --detach ../base HEAD"]]
+    + [("qa", c, "block") for c in ["git add -f tests/x", "git add -p", "git commit --amend -m x",
+                                    "git commit --no-gpg-sign -S", "git worktree add --lock ../base HEAD"]]
+    + [("rev", c, "block") for c in ["git remote -v --foo", "git stash list --bogus"]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES + ETK_EXEC_FORMS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES + ETK_EXEC_FORMS + GIT_OTHER_OPTIONS)
 
 
 def make_project(base: Path) -> Path:
@@ -1256,6 +1275,18 @@ class GuardCorpus(unittest.TestCase):
                                capture_output=True, text=True)
             self.assertEqual(r.returncode, 2, r.stderr)
             self.assertIn("guard error", r.stderr)
+
+    def test_every_allowlisted_git_subcommand_has_an_option_list(self):
+        missing = (guard.GIT_READ | guard.QA_GIT) - set(guard.GIT_OPTION_ALLOW)
+        self.assertEqual(missing, set())
+
+    def test_git_subcommand_without_option_list_refuses_options(self):
+        with mock.patch.dict(guard.GIT_OPTION_ALLOW):
+            del guard.GIT_OPTION_ALLOW["diff"]
+            self.assertEqual(guard.unknown_git_option("diff", ["--stat"]), "--stat")
+            self.assertIsNone(guard.unknown_git_option("diff", ["HEAD", "--", "-x"]))
+            self.assertEqual(self.verdict("rev", "git diff --stat"), "block")
+            self.assertEqual(self.verdict("rev", "git diff HEAD"), "allow")
 
     def test_hook_matcher_covers_mcp_tools(self):
         hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())

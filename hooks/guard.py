@@ -1228,16 +1228,25 @@ GIT_OPTION_ALLOW.update({
     "config": set("""--get --get-all --get-regexp --list -l --local --global --system --worktree --show-origin
         --show-scope --name-only -z --null --type --bool --int --default --includes --no-includes -f --file""".split()),
 })
-GIT_OPTION_ALLOW["branch"] = LIST_FLAGS
-GIT_OPTION_ALLOW["tag"] = LIST_FLAGS
+GIT_OPTION_ALLOW.update({
+    "branch": LIST_FLAGS, "tag": LIST_FLAGS,
+    "remote": {"-v", "--verbose"}, "worktree": {"--porcelain", "-z", "--verbose", "--detach", "--quiet", "-q", "-b", "-B"},
+    "stash": set(_DIFF) | {"--include-untracked", "--only-untracked"},
+    "reflog": set(_LOG) | {"--date"}, "submodule": {"--cached", "--recursive", "--quiet", "-q"},
+    "add": set("""-A --all -u --update -N --intent-to-add -v --verbose -n --dry-run --ignore-errors --renormalize
+        --no-warn-embedded-repo --""".split()),
+    "commit": set("""-m --message -F --file -a --all -q --quiet --allow-empty --no-verify -s --signoff --author --date
+        -v --verbose --no-edit --allow-empty-message --""".split()),
+})
 SHORT_WITH_VALUE = {"-n", "-U", "-S", "-G", "-L", "-M", "-C", "-x", "-A", "-B", "-e", "-f", "-m", "-u", "-l", "-c"}
 
 
 def unknown_git_option(sub: str, rest: list[str]) -> str | None:
     """The first option that isn't on the subcommand's list of known read-only ones."""
     allowed = GIT_OPTION_ALLOW.get(sub)
-    if allowed is None:
-        return None
+    if allowed is None:  # no list for this subcommand: any option is unknown
+        before_paths = rest[:rest.index("--")] if "--" in rest else rest
+        return next((a for a in before_paths if a.startswith("-") and a != "-"), None)
     for a in rest:
         if a == "--":
             break
@@ -1277,7 +1286,7 @@ def git_read_only_reason(args: list[str], qa: bool = False) -> str | None:
             and (not [a for a in rest if not a.startswith("-")] or set(rest) & {"-l", "--list", "--contains", "--merged",
                                                                                 "--no-merged", "--points-at"}):
         return None
-    if sub == "tag" and all(a in LIST_FLAGS for a in rest):
+    if sub == "tag" and all(a.split("=", 1)[0] in LIST_FLAGS for a in rest):
         return None
     if sub == "remote" and rest[:1] in ([], ["-v"], ["-vv"], ["show"], ["get-url"]):
         return None
