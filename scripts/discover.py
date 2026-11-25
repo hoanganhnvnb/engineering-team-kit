@@ -11,9 +11,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import datetime as dt
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import etk_profile  # noqa: E402  (same directory; imported, not spawned)
 
 MAX_LIST = 15
 SKIP_DIRS = {
@@ -21,6 +25,9 @@ SKIP_DIRS = {
     "__pycache__", ".venv", "venv", ".tox", "target", ".turbo", ".cache",
     "coverage", ".etk", ".claude/worktrees",
 }
+# Read-only git: never start an fsmonitor daemon, run a hook or take an optional lock.
+GIT = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "--no-optional-locks"]
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
 
 def run(cmd: list[str], cwd: Path, timeout: int = 10) -> str:
@@ -38,14 +45,14 @@ def run_checked(cmd: list[str], cwd: Path, timeout: int = 10) -> str | None:
 
 
 def find_root(start: Path) -> Path:
-    top = run(["git", "rev-parse", "--show-toplevel"], start)
+    top = run(GIT + ["rev-parse", "--show-toplevel"], start)
     return Path(top) if top else start
 
 
 def git_files(root: Path) -> list[str] | None:
     """Tracked + untracked-not-ignored paths, or None when this isn't a git work tree."""
     try:
-        out = subprocess.run(["git", "ls-files", "-co", "--exclude-standard", "-z"], cwd=root,
+        out = subprocess.run(GIT + ["ls-files", "-co", "--exclude-standard", "-z"], cwd=root,
                              capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -119,6 +126,62 @@ def frontmatter(p: Path) -> dict[str, str]:
 def short(s: str, n: int = 110) -> str:
     s = " ".join(s.split())
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def clean(s, n: int = 80) -> str:
+    """Repository text shown inside the snapshot: no control characters or backticks, bounded length."""
+    return short(re.sub(r"[\x00-\x1f\x7f`]", " ", str(s)), n)
+
+
+def data_arg(argv: list[str]) -> str | None:
+    for i, a in enumerate(argv):
+        if a == "--data" and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith("--data="):
+            return a.split("=", 1)[1]
+    return None
+
+
+def profile_block(root: Path, raw_data: str | None) -> None:
+    """The developer's workflow profile (kept in the plugin data dir, never in the repo)."""
+    try:
+        lines, missing, _ = etk_profile.snapshot(raw_data, root)
+    except etk_profile.UsageError:
+        print("- profile: unknown here; run `etk.sh profile show --data <plugin data dir>`")
+        return
+    if missing:
+        lines = [f"missing: {', '.join(missing)} → onboard (workflows/profile.md)"]
+    else:
+        mem = [l for l in lines if l.startswith("memory: ")]
+        lines = [l for l in lines if not l.startswith(("file: ", "memory: "))][:3]
+        if mem and lines:
+            lines[-1] += f" · {mem[0]}"
+    print("\n### Workflow profile")
+    for line in lines:
+        print(f"- {line}")
+
+
+def previous_run(root: Path) -> str | None:
+    """Newest real run dir. A repo can commit `.etk/runs/<future-date>-x/` or symlink it elsewhere: skipped."""
+    etk, runs = root / ".etk", root / ".etk" / "runs"
+    if etk.is_symlink() or runs.is_symlink() or not runs.is_dir():
+        return None
+    out = run(GIT + ["ls-files", "-z", "--", ".etk"], root)
+    tracked = {n.split("/")[2] for n in out.split("\0") if n.count("/") >= 2}
+    limit = dt.datetime.now() + dt.timedelta(minutes=5)
+    best = None
+    for d in sorted(runs.iterdir()):
+        m = re.match(r"^(\d{8}-\d{6})", d.name)
+        if not m or d.is_symlink() or d.name in tracked:
+            continue
+        try:
+            when = dt.datetime.strptime(m.group(1), "%Y%m%d-%H%M%S")
+        except ValueError:
+            continue
+        gates = d / "gates.json"
+        if when <= limit and gates.is_file() and not gates.is_symlink():
+            best = d
+    return rel(best, root) if best else None
 
 
 def section(title: str, lines: list[str]) -> None:
@@ -204,11 +267,13 @@ def hard_checks(root: Path, names: set[str], pkg, ci: list[str]) -> list[str]:
 def main() -> int:
     root = find_root(Path.cwd())
     print(f"## Project snapshot\n\n- root: `{root}`")
+    if (PLUGIN_ROOT / "conventions" / "README.md").is_file():
+        print(f"- Conventions: {PLUGIN_ROOT / 'conventions' / 'README.md'}")
 
     # Git state -- the Lead must know about uncommitted work before touching anything.
-    branch = run(["git", "branch", "--show-current"], root)
-    if branch or run(["git", "rev-parse", "--git-dir"], root):
-        raw = run_checked(["git", "status", "--porcelain"], root, timeout=30)
+    branch = run(GIT + ["branch", "--show-current"], root)
+    if branch or run(GIT + ["rev-parse", "--git-dir"], root):
+        raw = run_checked(GIT + ["status", "--porcelain"], root, timeout=30)
         if raw is None:
             print(f"- git: branch `{branch or '(detached)'}`, uncommitted changes UNKNOWN (git status failed or "
                   "timed out). Run `git status` yourself before touching files")
@@ -216,13 +281,14 @@ def main() -> int:
         else:
             status = raw.splitlines()
             print(f"- git: branch `{branch or '(detached)'}`, {len(status)} uncommitted path(s)")
-        last = run(["git", "log", "-1", "--format=%h %s"], root)
+        last = run(GIT + ["-c", "log.showSignature=false", "log", "-1", "--format=%h %s"], root)
         if last:
             print(f"- last commit: {short(last, 90)}")
         if status:
             section("Uncommitted changes (do not overwrite)", [f"`{s}`" for s in status])
     else:
         print("- git: not a repository (no branch/worktree isolation available)")
+    profile_block(root, data_arg(sys.argv[1:]))
 
     files: list[Path] = []
     for d, names in walk(root, 4):
@@ -275,7 +341,7 @@ def main() -> int:
         stack.append(f"node ({pm})" + (f": {', '.join(known)}" if known else ""))
         for k, v in (pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}).items():
             if re.search(r"test|lint|type|check|build|e2e|format", k):
-                cmds.append(f"`{pm} run {k}` → {short(str(v), 70)}")
+                cmds.append(f"`{pm} run {clean(k)}` → {clean(v, 70)}")
     if (root / "pyproject.toml").exists() or (root / "requirements.txt").exists() or (root / "setup.py").exists():
         py = (root / "pyproject.toml").read_text(errors="replace") if (root / "pyproject.toml").exists() else ""
         stack.append("python" + (" (django)" if "django" in py.lower() or (root / "manage.py").exists() else ""))
@@ -299,7 +365,7 @@ def main() -> int:
     if isinstance(comp, dict):
         for k in (comp.get("scripts") if isinstance(comp.get("scripts"), dict) else {}):
             if re.search(r"test|lint|stan|check", k):
-                cmds.append(f"`composer {k}`")
+                cmds.append(f"`composer {clean(k)}`")
     if (root / "Makefile").exists():
         targets = re.findall(r"^([a-zA-Z0-9_-]+):", (root / "Makefile").read_text(errors="replace"), re.M)
         useful = [t for t in targets if re.search(r"test|lint|check|build|e2e", t)]
@@ -343,12 +409,12 @@ def main() -> int:
             if isinstance(r, dict) and r.get("rule"):
                 paths = r.get("paths")
                 paths = ", ".join(map(str, paths)) if isinstance(paths, list) else str(paths or "*")
-                rl.append(f"`{paths}` → {short(str(r['rule']), 160)}" + (f" (check: `{r['check']}`)" if r.get("check") else ""))
+                rl.append(f"`{paths}` → {short(str(r['rule']), 160)}" + (f" (check: `{clean(r['check'])}`)" if r.get("check") else ""))
         section("Path-scoped rules", rl)
 
-    runs = sorted((root / ".etk" / "runs").glob("*/gates.json")) if (root / ".etk" / "runs").exists() else []
-    if runs:
-        print(f"\n- previous ETK run: `{rel(runs[-1].parent, root)}`")
+    prev = previous_run(root)
+    if prev:
+        print(f"\n- previous ETK run: `{prev}`")
     return 0
 
 
