@@ -368,14 +368,17 @@ class ReleaseLedgerTests(unittest.TestCase):
                  "--target", "web-eu", str(run))
         self.etk("act", "--action", "deploy", "--target", "web-eu", "--exit", "0", "--production", str(run))
         self.assertIn("production deploy", self.check(run).stdout)
-        for quote in ("deploy it to PROD please", "ship to web-eu", "push it live", "không test nữa, deploy prod"):
+        for quote in ("deploy it to PROD please", "ship to web-eu", "push it live", "không test nữa, deploy prod",
+                      "review không lỗi thì deploy prod luôn", "no errors -> deploy prod",
+                      "tests pass and no regressions then ship to production"):
             led = self.ledger(run)
             led["authorizations"][0]["quote"] = quote
             self.write(run, led)
             r = self.check(run)
             self.assertEqual(r.returncode, 0, (quote, r.stdout))
         for quote in ("deploy to the productive box", "deploy to web-eu-staging", "deploy to nonprod_live",
-                      "deploy staging, don't touch prod", "never deploy live", "không deploy production"):
+                      "deploy staging, don't touch prod", "never deploy live", "không deploy production",
+                      "don't deploy prod", "không deploy prod", "deploy staging, not production", "never touch prod"):
             led["authorizations"][0]["quote"] = quote
             self.write(run, led)
             self.assertIn("production deploy", self.check(run).stdout, quote)

@@ -93,6 +93,8 @@ GATED_ACTIONS = {"commit", "push", "pr", "merge", "tag", "deploy"}  # not before
 PROD_WORDS = re.compile(r"(?<![\w-])(production|prod|live)(?![\w-])", re.I)
 # A negation earlier in the same clause ("don't deploy to prod", "không deploy live").
 NEGATION = re.compile(r"(?<![\w-])(don['’]?t|do not|never|not|no|không|đừng)(?![\w-])", re.I)
+# Where a clause ends: punctuation, or a "then" ("no errors -> deploy prod", "không lỗi thì deploy prod").
+CLAUSE_END = re.compile(r"[.;,!?\n]|->|→|=>|(?<![\w-])(?:then|thì)(?![\w-])", re.I)
 # How far ahead `latest` accepts a run name (clock skew); discover.previous_run uses the same.
 FUTURE_SLACK = dt.timedelta(days=1)
 DECISION_LEVELS = {"L0", "L1", "L2", "L3", "L4"}
@@ -490,7 +492,7 @@ def word(name: str) -> re.Pattern:
 def affirms(quote: str, pattern: re.Pattern) -> bool:
     """`pattern` occurs in `quote` outside a negated clause ("don't touch prod" doesn't count)."""
     for m in pattern.finditer(quote):
-        clause = re.split(r"[.;,!?\n]", quote[:m.start()])[-1]
+        clause = CLAUSE_END.split(quote[:m.start()])[-1]
         if not NEGATION.search(clause):
             return True
     return False
