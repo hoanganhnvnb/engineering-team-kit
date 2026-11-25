@@ -892,7 +892,9 @@ def safe_home(cmd: str) -> str | None:
     """$HOME for expanding `cd ~` / `cd $HOME/x`, or None when the command could change HOME first
     (any mention of HOME other than reading `$HOME`/`${HOME}`), or HOME isn't an absolute path."""
     home = os.environ.get("HOME", "")
-    if not os.path.isabs(home) or re.search(r"\bHOME\b", re.sub(r"\$(\{HOME\}|HOME\b)", "", cmd)):
+    # Quotes and backslashes are dropped first so `H"OME"=x` or `HO\\ME=x` still count as a mention.
+    flat = re.sub(r"[\"'\\]", "", cmd)
+    if not os.path.isabs(home) or re.search(r"\bHOME\b", re.sub(r"\$(\{HOME\}|HOME\b)", "", flat)):
         return None
     return os.path.normpath(home)
 

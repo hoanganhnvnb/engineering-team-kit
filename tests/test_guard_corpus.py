@@ -1237,7 +1237,8 @@ GIT_REMOTE_CONFIG = (
     + [("dev", c, "allow") for c in ["git config user.name 'Dev Bot'", "git config get remote.origin.url",
                                      "git config --local core.autocrlf false"]]
 )
-# Second review: more keys and files that redirect a push or make git run a program.
+# Second review: more keys and files that redirect a push or make git run a program, and
+# HOME changes spelled with quotes or backslashes.
 GIT_CONFIG_MORE = (
     [(r, c, "block") for r in ("dev", "qa") for c in [
         "git config branch.main.pushRemote evil",
@@ -1257,6 +1258,10 @@ GIT_CONFIG_MORE = (
         "echo x > .git/worktrees/w/config",
         "echo '* filter=x' > .git/info/attributes",
         "echo x > ~/.config/git/config",
+    ]]
+    + [("dev", c, "block") for c in [
+        'H"OME"=/x cd ~/.claude/plugins/data/etk && echo x > p.json',
+        "HO\\ME=/x cd ~/.claude/plugins/data/etk && echo x > p.json",
     ]]
     + [("dev", c, "allow") for c in ["git config user.email dev@example.com", "cat ~/.gitconfig",
                                      "git config --get branch.main.remote"]]
