@@ -5,6 +5,9 @@ All notable changes to this plugin. Versions follow semver; the version in
 
 ## Unreleased
 
+- New `/engineering-team:readme`: audits the README against the real repository,
+  rewrites it with the design rules in `workflows/readme.md`, and has a fresh reviewer
+  check commands, links, badges and diagrams. It leaves the changes uncommitted.
 - Python lookup is shared and wider. `scripts/find-python.sh` also checks `$ETK_PYTHON`
   and the pyenv, uv, asdf and mise version folders, so a `python3` shim that points at an
   old version no longer hides an installed 3.12. The "not found" message now says how to

@@ -43,7 +43,7 @@ Running log of building ETK itself. Newest state at the top of each phase.
 
 ## Decisions made along the way
 
-- **`disable-model-invocation: true` on all six step skills.** Team workflows cost real
+- **`disable-model-invocation: true` on all seven step skills.** Team workflows cost real
   tokens; they should start because the user asked, not because a prompt said "fix".
   0.4.0 adds one exception, `team`: a narrow description lets the model start it for
   plain build/fix/ship requests, and it echoes a one-line plan first.

@@ -3,8 +3,8 @@
 The `team` skill takes one task from request to shipped. It implements or fixes the
 change, has it reviewed and tested independently, and loops until the gates pass. Then
 it commits, pushes, opens a PR or merges, and deploys, but only as far as your workflow
-profile and your own words allow. The six step commands (`/engineering-team:build`,
-`fix`, `review`, `test`, `improve-ui`, `retro`) still work on their own.
+profile and your own words allow. The seven step commands (`/engineering-team:build`,
+`fix`, `review`, `test`, `improve-ui`, `retro`, `readme`) still work on their own.
 
 ## Asking for it
 

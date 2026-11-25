@@ -69,7 +69,7 @@ class Conventions(unittest.TestCase):
 
 class PluginStructure(unittest.TestCase):
     def test_required_commands_exist(self):
-        self.assertEqual(SKILLS, {"build", "fix", "review", "test", "improve-ui", "retro", "team"})
+        self.assertEqual(SKILLS, {"build", "fix", "review", "test", "improve-ui", "retro", "readme", "team"})
 
     def test_required_agents_exist(self):
         self.assertEqual(AGENTS, {"developer", "code-reviewer", "qa-engineer", "ux-reviewer", "scout", "tech-writer"})
@@ -156,6 +156,14 @@ class PluginStructure(unittest.TestCase):
             self.assertIn(f"]({doc})", readme, doc)
         self.assertNotIn("README.vi.md", "\n".join(readme.splitlines()[:60]))
 
+    def test_every_skill_is_in_the_changelog_or_docs_usage(self):
+        usage = (ROOT / "docs" / "usage.md").read_text()
+        changelog = (ROOT / "CHANGELOG.md").read_text()
+        for name in SKILLS - {"team"}:
+            with self.subTest(skill=name):
+                self.assertIn(f"## {name}", usage)
+        self.assertIn("/engineering-team:readme", changelog)
+
     def test_old_never_push_wording_is_gone(self):
         for path in [ROOT / "README.md", ROOT / "docs" / "configuration.md", ROOT / "docs" / "limitations.md",
                      ROOT / "quality" / "report-template.md", *(ROOT / "skills").glob("*/SKILL.md")]:
@@ -166,7 +174,7 @@ class PluginStructure(unittest.TestCase):
                     self.assertNotIn(phrase, text)
 
     def test_progress_log_counts_match_the_repo(self):
-        words = {4: "four", 5: "five", 6: "six", 7: "seven"}
+        words = {4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight"}
         progress = (ROOT / "docs" / "PROGRESS.md").read_text()
         self.assertIn(f"{len(AGENTS)} subagents", progress)
         self.assertIn(f"all {words[len(SKILLS) - 1]} step skills", progress)

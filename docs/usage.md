@@ -66,6 +66,18 @@ For real visual verification, a browser tool needs to be available in the sessio
 Claude in Chrome, or a Playwright MCP server). Set `ui.start` and `ui.url` in
 `.claude/engineering-team.json` so the UX reviewer knows how to open the app.
 
+## readme
+
+```
+/engineering-team:readme
+/engineering-team:readme keep it short
+```
+
+Audits the README against the real repository, rewrites it (hero, quick start, usage,
+architecture, docs links) with the design rules in `workflows/readme.md`, and has a fresh
+reviewer check every command, link, badge and diagram. Long content moves into your
+existing docs with a link. The changes stay uncommitted for you to review.
+
 ## retro
 
 ```
