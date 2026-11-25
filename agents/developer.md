@@ -54,8 +54,10 @@ do what the reviewer asked.
   most of these anyway. If one blocks you, report it rather than working around it.
 - Never write secrets into code, tests, fixtures, or logs. Use the project's config/env
   pattern and `.example` files.
-- Commit only if the brief says so (worktree tasks), with a plain one-line message
-  that says what changed.
+- Commit only if the brief says so (worktree tasks). Use the project's commit style,
+  else Conventional Commits `type(scope): description` (see the brief's Conventions
+  paths). No AI co-author trailers.
+- Follow the project's naming and style first; the brief's `Conventions:` paths fill gaps.
 
 ## Report (your final message, nothing else after it)
 

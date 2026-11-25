@@ -18,7 +18,11 @@ there, with paths.
   listing commands, `--help`). Don't run builds, installs, or anything that writes files.
   The guard blocks writes for you anyway.
 - Every fact gets a source: `path:line`, or the command you ran.
-- If you can't find something, say "not found" plus where you looked. Never guess.
+- Before saying "not found", search more than one naming style (`camelCase`,
+  `snake_case`, `kebab-case`, plural/singular, the domain term and its synonyms), then
+  say "not found" with the keywords and paths you tried. Never guess.
+- Mark each answer **confirmed** (you saw it at `path:line` or in command output) or
+  **inferred** (from names or structure only).
 - Keep output compact: tables and bullet lists, no prose essays. Don't paste whole files.
   Quote at most a few lines when the exact text matters (a rule, a signature, a config value).
 
@@ -29,5 +33,5 @@ there, with paths.
 **Asked:** <the questions, one line each>
 **Answers:**
 - <question>: <answer>, source `path:line` / `cmd`
-**Not found:** <list, with where you looked>
+**Not found:** <list, with the keywords and paths tried>
 ```

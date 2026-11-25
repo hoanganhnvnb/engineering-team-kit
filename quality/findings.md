@@ -31,7 +31,7 @@ into the ledger):
 - `location`: `path:line`, or `path` + symbol, or a URL + selector for UI.
 - `evidence`: the thing that makes it checkable: a failing command, a code quote, a
   screenshot reference, or exact reproduction steps.
-- `category`: a short stable slug (`correctness`, `security`, `regression`, `missing-test`,
+- `category`: a short stable slug (`correctness`, `security`, `regression`, `missing-test`, `convention`,
   `pattern-spread`, `justifying-comment`, `ungrounded-cause`, `a11y`, `performance`…).
   Keep the same slug for the same kind of problem, because `etk_run.py stats` counts recurring
   categories to find the next check worth adding.
