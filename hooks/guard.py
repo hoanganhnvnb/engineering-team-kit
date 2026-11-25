@@ -499,6 +499,38 @@ def untracked_secrets(cwd: str) -> list[str]:
     return [f for f in out.splitlines() if is_secret(f)]
 
 
+CHECKOUT_OK_FLAGS = {"-b", "-B", "--detach", "-q", "--quiet", "--track", "-t", "--no-track"}
+
+
+def is_ref(name: str, cwd: str) -> bool:
+    if name == "-":
+        return True
+    for cmd in (["git", "rev-parse", "--verify", "--quiet", f"{name}^{{commit}}"],
+                ["git", "for-each-ref", "--count=1", "--format=%(refname)", f"refs/remotes/*/{name}"]):
+        try:
+            out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        if out.returncode == 0 and out.stdout.strip():
+            return True
+    return False
+
+
+def check_checkout(rest: list[str], cwd: str) -> None:
+    """Only switching branches or creating one is safe; anything with a path overwrites files."""
+    flags = [a for a in rest if a.startswith("-") and a != "-"]
+    operands = [a for a in rest if not a.startswith("-") or a == "-"]
+    if "--" in rest or [f for f in flags if f not in CHECKOUT_OK_FLAGS]:
+        raise Blocked("`git checkout` with paths or force/patch/merge flags discards uncommitted changes")
+    if "-b" in flags or "-B" in flags:
+        if len(operands) > 2:
+            raise Blocked("`git checkout -b NAME` takes a branch name and an optional start point only")
+        return
+    if len(operands) > 1 or (operands and not is_ref(operands[0], cwd)):
+        raise Blocked("`git checkout` of anything but a single branch or commit overwrites files; "
+                      "use `git switch` for branches")
+
+
 def check_git(args: list[str], cwd: str, cur: str | None) -> None:
     i = 0
     while i < len(args) and args[i].startswith("-"):
@@ -523,8 +555,8 @@ def check_git(args: list[str], cwd: str, cur: str | None) -> None:
         raise Blocked("reset --hard discards work; ask the Lead instead")
     if sub == "clean" and (short("f") or has("--force")):
         raise Blocked("git clean deletes untracked files that may be the user's")
-    if sub == "checkout" and ("--" in rest or "." in rest or has("-f", "--force", "-p", "--patch")):
-        raise Blocked("checkout of paths discards uncommitted changes")
+    if sub == "checkout":
+        check_checkout(rest, cwd)
     if sub == "restore" and not (has("--staged", "-S") and not has("--worktree", "-W")):
         raise Blocked("git restore discards uncommitted changes")
     if sub == "switch" and has("-f", "--force", "--discard-changes"):

@@ -532,8 +532,40 @@ CREATED_OPERAND = (
     ]]
 )
 
+# R1-3: `git checkout` with a path discards uncommitted work.
+GIT_CHECKOUT = (
+    [("dev", c, "block") for c in [
+        "git checkout src/a.js",
+        "git checkout HEAD src/a.js",
+        "git checkout HEAD -- src/a.js",
+        "git checkout main -- .",
+        "git checkout -- .",
+        "git checkout .",
+        "git checkout -f main",
+        "git checkout --force feature",
+        "git checkout -p",
+        "git checkout -m feature",
+        "git checkout main src/a.js",
+        "git checkout -b x -- src/a.js",
+        "git checkout nosuchbranch",
+        "git -C . checkout src/a.js",
+        "cd src && git checkout a.js",
+        "timeout 5 git checkout src/a.js",
+    ]]
+    + [("dev", c, "allow") for c in [
+        "git checkout main",
+        "git checkout feature",
+        "git checkout -b etk/x",
+        "git checkout -B etk/y main",
+        "git checkout -b x HEAD~1",
+        "git checkout --detach HEAD",
+        "git checkout -",
+        "git checkout HEAD",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT)
 
 
 def make_project(base: Path) -> Path:
