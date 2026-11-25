@@ -214,6 +214,19 @@ class LedgerTests(unittest.TestCase):
         self.write(run, ledger)
         self.assertEqual(self.check(run).returncode, 0)
 
+    def test_report_only_review_may_complete_with_open_medium(self):
+        run, ledger = self.init("--kind", "review")
+        ledger["gates"]["G2"] = {"status": "PASS", "evidence": "reviewed git diff main, 3 files"}
+        ledger["gates"]["G6"] = {"status": "PASS", "evidence": "no secrets, authz checked on new route"}
+        ledger["findings"] = [self.finding(severity="medium")]
+        ledger["outcome"] = "COMPLETE"
+        self.write(run, ledger)
+        r = self.check(run)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        ledger["findings"][0]["severity"] = "high"
+        self.write(run, ledger)
+        self.assertIn("high finding R1-001 is open", self.check(run).stdout)
+
     def test_malformed_ledger_gives_messages_not_tracebacks(self):
         run, ledger = self.init()
         ledger = self.complete_ledger(ledger)

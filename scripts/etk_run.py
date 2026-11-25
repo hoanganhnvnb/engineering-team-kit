@@ -294,7 +294,8 @@ def _validate(ledger: dict) -> tuple[list[str], list[str]]:
             if st in {"FAIL", "BLOCKED"} or (st == "NOT_RUN" and g in required):
                 errors.append(f"COMPLETE but {g} is {st}")
         for f in findings:
-            if f.get("severity") == "medium" and f.get("status") in {"open", "disputed"}:
+            # A report-only review ends with its mediums listed as open; fix/build runs must settle them.
+            if f.get("severity") == "medium" and f.get("status") in {"open", "disputed"} and kind != "review":
                 errors.append(f"COMPLETE but medium finding {f.get('id')} is {f.get('status')} (fix it or record why not)")
             if f.get("severity") in BLOCKING:
                 if f.get("status") in {"open", "disputed"}:
