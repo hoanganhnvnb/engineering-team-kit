@@ -113,6 +113,12 @@ claude plugin marketplace update engineering-team-kit
 claude plugin update engineering-team@engineering-team-kit
 ```
 
+**To 0.5.0.**
+- New `/engineering-team:readme` command. Nothing else changes in your repo.
+- Python 3.12+ is now also found in pyenv, uv, asdf and mise folders, or through
+  `ETK_PYTHON`; see [If Python 3.12+ is not found](#if-python-312-is-not-found).
+- Subagents are now blocked from writing under `~/.claude` and the Python folders.
+
 **To 0.4.0.**
 - From 0.2.x you also get 0.3.0's floor: Python 3.12+.
 - The default branch of this repo is now `master` (was `main`). If
