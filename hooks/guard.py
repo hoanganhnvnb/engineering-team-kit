@@ -910,6 +910,8 @@ def check_find(args: list[str], root: str, role: str, depth: int, cur: str | Non
         if role == "qa-engineer" and not all(scratch(r, root, cur) for r in roots):
             raise Blocked("qa-engineer may only create new files, not delete existing ones")
     for j, e in enumerate(exprs):
+        if e in {"-fprint", "-fprint0", "-fprintf", "-fls"} and j + 1 < len(exprs):
+            check_write_target(exprs[j + 1], role, root, cur)
         if e not in {"-exec", "-execdir", "-ok", "-okdir"}:
             continue
         end = next((k for k in range(j + 1, len(exprs)) if exprs[k] in {";", "+"}), len(exprs))

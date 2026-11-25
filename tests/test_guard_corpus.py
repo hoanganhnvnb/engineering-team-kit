@@ -835,8 +835,21 @@ QA_LEAKS = (
     ]]
 )
 
+# find's file-writing actions follow the same rules as redirects.
+FIND_WRITES = (
+    [("dev", c, "block") for c in [
+        "find . -fprint .env",
+        "find . -fprint0 .env",
+        "find . -fprintf .env %p",
+        "find . -name x -fls key.pem",
+    ]]
+    + [("rev", "find . -fprint src/out.txt", "block"), ("qa", "find . -fprint tests/existing.test.js", "block")]
+    + [("dev", "find . -fprint out.txt", "allow"), ("rev", "find . -fprint /tmp/etk-out.txt", "allow"),
+       ("qa", "find . -fprint tests/new-list.txt", "allow")]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES)
 
 
 def make_project(base: Path) -> Path:
