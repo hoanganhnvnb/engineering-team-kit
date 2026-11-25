@@ -173,6 +173,9 @@ fixture with a deliberately stale README (`stale-readme` overlay).
 - **R** fixed the invented functions, scripts and tooling in the README, kept the credits line,
   asked a fresh reviewer, changed only `README.md` and committed nothing. It did not have the
   reviewer re-check its fixes after applying the four comments.
+- After adding an "Always a ledger" rule to the `team` skill, S2 was run three more times in
+  parallel: all three pushed, none deployed, and `run check` was OK on all three ($0.76–$1.04,
+  149–229 s). Three runs show the rule helps, not that it always holds.
 - One run each, so these show behavior, not rates.
 
 ## Caveats
