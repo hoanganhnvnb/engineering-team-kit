@@ -36,7 +36,7 @@ scope, deleting data or files the run didn't create. Confidence never lowers a l
   it is the user's call, the options, and what each costs or risks.
 - Put the recommended option first, labelled `(Recommended)`. Say whether it can be
   undone.
-- Write in the user's language. Tool limits: 1–4 questions per call, 2–4 options each,
+- Ask in the language the user wrote the request in. Tool limits: 1–4 questions per call, 2–4 options each,
   `header` ≤ 12 characters. "Other" is added for you. Use `preview` only to compare
   concrete artifacts side by side.
 - Ask dependent questions in order. Don't ask one whose relevance hangs on an

@@ -1,7 +1,7 @@
 # Final report template
 
-Write in the user's language. Keep it short. The user should be able to tell in ten
-seconds whether it's done and what to check. Paste the output of
+Reply in the language the user wrote the request in. Keep it short. The user should be
+able to tell in ten seconds whether it's done and what to check. Paste the output of
 `etk_run.py render` for the tables rather than retyping them.
 
 ```markdown
