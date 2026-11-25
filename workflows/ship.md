@@ -6,17 +6,22 @@ drives the run, or a build/fix run finishes and the workflow profile says
 merge or deploy.
 
 Below, `etk` is short for `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh"` and `RUN` is the
-run directory that `run init` printed. Pass `RUN` to every ledger command.
+run directory that `run init` printed. Pass `RUN` to every ledger command. `DATA` is the
+plugin data path from the skill's "Plugin data dir" line.
 
 ## 0. Is it a pass?
 
 Release only when all of these hold. If any fails, stop before the first outward step,
 report what is missing, and ask.
 
-- `etk run check RUN` exits 0 with every required gate settled.
+- Run `etk run ready RUN` before each outward step; it must exit 0. That means every
+  gate except G7 is PASS or a justified NOT_APPLICABLE, every AC is met, no open or
+  disputed finding of medium severity or above, and no high/critical one left unverified.
+  `run check` alone is not enough: an in-progress run with G3/G4 FAIL is a consistent
+  ledger. `run act` refuses commit/push/pr/merge/tag/deploy while `ready` fails; use
+  `--force-record` only to record a step that already happened (it is stored with
+  `gates_ok: false` and `check` then fails the run).
 - G3/G4 were recorded through `etk exec`, not typed by hand.
-- No open or disputed finding of medium severity or above, and no high/critical one left
-  unverified. `run act` records whether this held at that moment.
 - A user-visible change was driven for real once (a `runtime` command or a G5 PASS).
 - `release.wait_ci` is set: CI on the pushed commit is green before merging or deploying.
 
@@ -25,20 +30,23 @@ report what is missing, and ask.
 Each outward action needs a reason to happen, recorded before it runs:
 
 ```bash
-etk run authorize --action push --source profile --quote "release.push: auto" RUN
+etk run authorize --action push --source profile --data DATA RUN
 etk run authorize --action deploy --target staging --source prompt \
   --quote "<the user's exact words>" --condition pass RUN
 ```
 
 | Action | Allowed source |
 |---|---|
-| commit, push, pr | the profile says `auto`, or the user's words |
+| commit, push, pr | the profile says `auto` (`--source profile --data …`; checked against the profile, and a PR needs `integrate: pr` plus `push: auto`), or the user's words |
 | merge, tag, deploy, rollback | the user's words only: this prompt (`prompt`) or an answer to your question (`answer`) |
 
 - Quote the user verbatim. "review xong không lỗi, pass thì deploy staging luôn" is
   permission to deploy staging, on the condition that the run passes.
 - A bare "deploy" means the single non-production target. Production needs the user
-  to name it.
+  to name it, and its own authorization with `--target <that target>`.
+- If `profile show --brief` says "profile from a different checkout/remote; re-confirm",
+  its `auto` values don't count: show the profile to the user and run `profile confirm`
+  only after they agree, or ask for each step.
 - Permission lasts for this run. Never copy it into the profile or a config file.
 - Permission from an earlier conversation must be shown to the user and confirmed
   again before you rely on it.
@@ -81,8 +89,9 @@ etk run authorize --action deploy --target staging --source prompt \
 - Run the target's `command` with
   `etk exec G7 --type runtime --run RUN -- <command>`. Then run its `verify` step the
   same way.
-- Record it with `etk run act --action deploy --target <name> [--production] --exit
-  <code> RUN`.
+- Record it with `etk run act --action deploy --target <name> [--production]
+  --data DATA --exit <code> RUN`. With `--data`, a target the profile
+  marks `production` is recorded as production even without the flag.
 - On failure: stop, report, and show the rollback command. Run the rollback only if
   rollback was authorized too.
 

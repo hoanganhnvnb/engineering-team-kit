@@ -1,8 +1,11 @@
 """Release bookkeeping in the run ledger (phase/authorize/act/decide, G7) and run-selection safety."""
 from __future__ import annotations
 
+import hashlib
+import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -11,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ETK = ROOT / "scripts" / "etk_run.py"
+PROFILE = ROOT / "scripts" / "etk_profile.py"
 
 
 def sh(args, cwd, stdin=None):
@@ -27,12 +31,28 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.dir = Path(self.tmp.name)
         git(self.dir, "init", "-q", "-b", "main")
         git(self.dir, "commit", "-q", "--allow-empty", "-m", "init")
+        datatmp = tempfile.TemporaryDirectory()
+        self.addCleanup(datatmp.cleanup)
+        self.data = Path(datatmp.name) / "plugins" / "data" / "etk"
+        self.data.mkdir(parents=True)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def etk(self, *args):
         return sh([sys.executable, str(ETK), *args], self.dir)
+
+    def profile(self, *args, cwd=None):
+        r = sh([sys.executable, str(PROFILE), *args, "--data", str(self.data)], cwd or self.dir)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def auth_profile(self, run, action="push"):
+        """Set release.<action>: auto in the workflow profile and authorize `action` from it."""
+        self.profile("set", f"release.{action}", "auto")
+        r = self.etk("authorize", "--action", action, "--source", "profile", "--data", str(self.data), str(run))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r
 
     def init(self, *extra):
         r = self.etk("init", "Ship discount codes", *extra)
@@ -138,8 +158,7 @@ class ReleaseLedgerTests(unittest.TestCase):
             self.assertEqual(r.returncode, 2, args)
             self.assertNotIn("Traceback", r.stderr)
         self.assertEqual((run / "gates.json").read_text(), before)
-        r = self.etk("authorize", "--action", "push", "--source", "profile", str(run))
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.auth_profile(run, "push")
         r = self.etk("authorize", "--action", "merge", "--source", "prompt", "--quote", "merge it when green",
                      "--target", "main", str(run))
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -147,6 +166,66 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.assertEqual([(a["action"], a["source"], a["target"], a["condition"]) for a in auths],
                          [("push", "profile", "", "pass"), ("merge", "prompt", "main", "pass")])
         self.assertTrue(all(a["granted_at"] for a in auths))
+
+    def test_profile_authorization_is_checked_against_the_profile(self):
+        run, _ = self.init("--kind", "ship")
+        before = (run / "gates.json").read_text()
+        data = ("--data", str(self.data))
+        # no --data, no profile yet, a profile that says confirm, a PR without integrate pr
+        r = self.etk("authorize", "--action", "push", "--source", "profile", str(run))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--data", r.stderr)
+        self.assertEqual(self.etk("authorize", "--action", "push", "--source", "profile", *data, str(run)).returncode, 2)
+        self.profile("set", "release.push", "confirm")
+        r = self.etk("authorize", "--action", "push", "--source", "profile", *data, str(run))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not \"auto\"", r.stderr)
+        self.profile("set", "release.push", "auto")
+        self.assertEqual(self.etk("authorize", "--action", "pr", "--source", "profile", *data, str(run)).returncode, 2)
+        self.assertEqual((run / "gates.json").read_text(), before)
+        self.profile("set", "release.integrate", "pr")
+        for action in ("push", "pr"):
+            r = self.etk("authorize", "--action", action, "--source", "profile", *data, str(run))
+            self.assertEqual(r.returncode, 0, r.stderr)
+        path = Path(self.profile("path").strip())
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        led = self.ledger(run)
+        self.assertEqual(led["profile_hash"], digest)
+        self.assertEqual([a["profile_hash"] for a in led["authorizations"]], [digest, digest])
+        # a hand-written profile authorization (no hash) doesn't count
+        led["authorizations"].append({"action": "commit", "source": "profile", "quote": "", "target": ""})
+        self.write(run, led)
+        self.assertIn("source profile without the profile's hash", self.check(run).stdout)
+
+    def test_profile_from_another_checkout_or_push_url_does_not_authorize(self):
+        git(self.dir, "remote", "add", "origin", "https://github.com/victim/prod.git")
+        run, _ = self.init("--kind", "ship")
+        self.profile("set", "release.push", "auto")
+        self.profile("confirm")
+        data = ("--data", str(self.data))
+        # repository code points the push somewhere else: the stored auto no longer applies
+        git(self.dir, "config", "remote.origin.pushurl", "https://evil.example/x.git")
+        r = self.etk("authorize", "--action", "push", "--source", "profile", *data, str(run))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("different checkout/remote", r.stderr)
+        self.assertIn("different checkout/remote", self.profile("show", "--brief"))
+        self.assertIn("release.push", self.profile("missing"))
+        git(self.dir, "config", "--unset", "remote.origin.pushurl")
+        self.assertEqual(self.etk("authorize", "--action", "push", "--source", "profile", *data, str(run)).returncode, 0)
+        # another checkout claiming the same origin finds the profile but can't use its auto values
+        othertmp = tempfile.TemporaryDirectory()
+        self.addCleanup(othertmp.cleanup)
+        other = Path(othertmp.name)
+        git(other, "init", "-q", "-b", "main")
+        git(other, "commit", "-q", "--allow-empty", "-m", "init")
+        git(other, "remote", "add", "origin", "git@github.com:victim/prod.git")
+        self.assertEqual(self.profile("path", cwd=other), self.profile("path"))
+        r = sh([sys.executable, str(ETK), "init", "x", "--kind", "ship"], other)
+        orun = Path(r.stdout.strip())
+        r = sh([sys.executable, str(ETK), "authorize", "--action", "push", "--source", "profile", *data, str(orun)],
+               other)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("different checkout/remote", r.stderr)
 
     def test_hand_written_profile_merge_authorization_is_rejected(self):
         run, led = self.init("--kind", "ship")
@@ -173,7 +252,7 @@ class ReleaseLedgerTests(unittest.TestCase):
 
     def test_authorized_push_after_gates_completes(self):
         run = self.ship_run()
-        self.etk("authorize", "--action", "push", "--source", "profile", str(run))
+        self.auth_profile(run, "push")
         r = self.etk("act", "--action", "push", "--target", "origin/feat", "--ref", "abc123", "--exit", "0", str(run))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(self.ledger(run)["actions"][0]["gates_ok"])
@@ -186,7 +265,13 @@ class ReleaseLedgerTests(unittest.TestCase):
     def test_push_before_gates_pass_fails_check(self):
         run, _ = self.init("--kind", "ship")
         self.etk("authorize", "--action", "push", "--source", "prompt", "--quote", "push when ready", str(run))
+        before = (run / "gates.json").read_text()
         r = self.etk("act", "--action", "push", "--exit", "0", str(run))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("run ready", r.stderr)
+        self.assertEqual((run / "gates.json").read_text(), before)
+        # a push that already happened is still recorded, as released before the gates passed
+        r = self.etk("act", "--action", "push", "--exit", "0", "--force-record", str(run))
         self.assertIn("gates had not passed", r.stdout)
         self.assertFalse(self.ledger(run)["actions"][0]["gates_ok"])
         out = self.check(run).stdout
@@ -197,8 +282,36 @@ class ReleaseLedgerTests(unittest.TestCase):
         led["findings"] = [{"id": "R1-001", "severity": "medium", "location": "a.py:1", "evidence": "repro: f(0) raises",
                             "expected": "0", "actual": "error", "remediation": "guard", "status": "open"}]
         self.write(run2, led)
-        self.etk("act", "--action", "commit", "--exit", "0", str(run2))
+        self.assertEqual(self.etk("act", "--action", "commit", "--exit", "0", str(run2)).returncode, 2)
+        self.etk("act", "--action", "commit", "--exit", "0", "--force-record", str(run2))
         self.assertFalse(self.ledger(run2)["actions"][0]["gates_ok"])
+
+    def test_ready_needs_settled_gates_not_just_a_consistent_ledger(self):
+        run = self.ship_run()
+        led = self.ledger(run)
+        led["gates"]["G3"]["status"] = "FAIL"
+        led["gates"]["G4"]["status"] = "FAIL"
+        self.write(run, led)
+        self.assertEqual(self.check(run).returncode, 0)  # an in-progress run with failing gates is consistent
+        r = self.etk("ready", str(run))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("G3 is FAIL", r.stdout)
+        self.assertIn("G4 is FAIL", r.stdout)
+        self.assertEqual(self.etk("act", "--action", "push", "--exit", "0", str(run)).returncode, 2)
+        led = self.passing(led, g7=False)
+        led["gates"]["G5"] = {"status": "NOT_APPLICABLE", "evidence": "no UI in this change at all"}
+        led["findings"] = [{"id": "R1", "severity": "high", "location": "a.py:1", "evidence": "repro: f(0) raises",
+                            "expected": "0", "actual": "error", "remediation": "guard", "status": "fixed"}]
+        self.write(run, led)
+        r = self.etk("ready", str(run))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not independently verified", r.stdout)
+        led["findings"][0]["status"] = "verified"
+        self.write(run, led)
+        r = self.etk("ready", str(run))
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(self.etk("act", "--action", "commit", "--exit", "0", str(run)).returncode, 0)
+        self.assertTrue(self.ledger(run)["actions"][0]["gates_ok"])
 
     def test_rollback_is_exempt_from_gates_but_needs_user_words(self):
         run, _ = self.init("--kind", "ship")
@@ -229,22 +342,54 @@ class ReleaseLedgerTests(unittest.TestCase):
 
     def test_production_deploy_needs_the_word(self):
         run = self.ship_run()
-        self.etk("authorize", "--action", "deploy", "--source", "prompt", "--quote", "go ahead and deploy", str(run))
+        self.etk("authorize", "--action", "deploy", "--source", "prompt", "--quote", "go ahead and deploy",
+                 "--target", "web-eu", str(run))
         self.etk("act", "--action", "deploy", "--target", "web-eu", "--exit", "0", "--production", str(run))
         self.assertIn("production deploy", self.check(run).stdout)
-        for quote in ("deploy it to PROD please", "ship to web-eu", "push it live"):
+        for quote in ("deploy it to PROD please", "ship to web-eu", "push it live", "không test nữa, deploy prod"):
             led = self.ledger(run)
             led["authorizations"][0]["quote"] = quote
             self.write(run, led)
             r = self.check(run)
             self.assertEqual(r.returncode, 0, (quote, r.stdout))
-        led["authorizations"][0]["quote"] = "deploy to the productive box"
+        for quote in ("deploy to the productive box", "deploy to web-eu-staging", "deploy to nonprod_live",
+                      "deploy staging, don't touch prod", "never deploy live", "không deploy production"):
+            led["authorizations"][0]["quote"] = quote
+            self.write(run, led)
+            self.assertIn("production deploy", self.check(run).stdout, quote)
+
+    def test_production_deploy_needs_a_target_specific_authorization(self):
+        run = self.ship_run()
+        self.etk("authorize", "--action", "deploy", "--source", "prompt", "--quote", "deploy it to production", str(run))
+        self.etk("act", "--action", "deploy", "--target", "web", "--exit", "0", "--production", str(run))
+        self.assertIn("exactly this target", self.check(run).stdout)
+        led = self.ledger(run)
+        led["authorizations"][0]["target"] = "web-staging"
         self.write(run, led)
-        self.assertIn("production deploy", self.check(run).stdout)
+        self.assertIn("no authorization", self.check(run).stdout)
+        led["authorizations"][0]["target"] = "WEB"
+        self.write(run, led)
+        self.assertEqual(self.check(run).returncode, 0, self.check(run).stdout)
+
+    def test_act_takes_production_from_the_profile(self):
+        run = self.ship_run()
+        self.profile("set", "deploy.targets", json.dumps([
+            {"name": "web-eu", "kind": "manual", "production": True},
+            {"name": "staging", "kind": "manual", "production": False}]))
+        data = ("--data", str(self.data))
+        self.etk("authorize", "--action", "deploy", "--source", "prompt", "--quote", "deploy staging and web-eu",
+                 "--target", "web-eu", str(run))
+        self.etk("authorize", "--action", "deploy", "--source", "prompt", "--quote", "deploy staging and web-eu",
+                 "--target", "staging", str(run))
+        for target, flag in (("web-eu", ()), ("staging", ()), ("staging", ("--production",))):
+            r = self.etk("act", "--action", "deploy", "--target", target, "--exit", "0", *flag, *data, str(run))
+            self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([a["production"] for a in self.ledger(run)["actions"]], [True, False, True])
+        self.assertEqual(self.check(run).returncode, 0, self.check(run).stdout)
 
     def test_failed_action_blocks_complete(self):
         run = self.ship_run()
-        self.etk("authorize", "--action", "push", "--source", "profile", str(run))
+        self.auth_profile(run, "push")
         self.etk("act", "--action", "push", "--exit", "1", str(run))
         out = self.complete(run, g7="FAIL").stdout
         self.assertIn("COMPLETE but action #1 (push) exited 1", out)
@@ -253,7 +398,7 @@ class ReleaseLedgerTests(unittest.TestCase):
 
     def test_pending_l4_decision_blocks_complete(self):
         run = self.ship_run()
-        self.etk("authorize", "--action", "push", "--source", "profile", str(run))
+        self.auth_profile(run, "push")
         self.etk("act", "--action", "push", "--exit", "0", str(run))
         r = self.etk("decide", "--id", "D1", "--level", "L4", "--question", "Drop the legacy table?",
                      "--options", "yes|no", "--recommended", "no", str(run))
@@ -283,7 +428,7 @@ class ReleaseLedgerTests(unittest.TestCase):
         led["gates"]["G7"]["evidence"] = "user said to leave the change uncommitted"
         self.write(run, led)
         self.assertEqual(self.check(run).returncode, 0, self.check(run).stdout)
-        self.etk("authorize", "--action", "commit", "--source", "profile", str(run))
+        self.auth_profile(run, "commit")
         self.etk("act", "--action", "commit", "--exit", "0", str(run))
         self.assertIn("G7: NOT_APPLICABLE but 1 release action", self.check(run).stdout)
 
@@ -357,6 +502,50 @@ class ReleaseLedgerTests(unittest.TestCase):
             self.assertIn("not inside", r.stderr)
         self.assertEqual(self.etk("render", str(outside)).returncode, 2)
         self.assertEqual(self.etk("check", str(run / "gates.json")).returncode, 0)
+
+    def test_exec_command_cannot_rewrite_the_ledger(self):
+        run, _ = self.init("--kind", "ship")
+        gates = run / "gates.json"
+        forge = (
+            "import json, pathlib; p = pathlib.Path(%r); led = json.loads(p.read_text()); "
+            "led['authorizations'].append({'action': 'push', 'source': 'prompt', 'quote': 'push it all', 'target': ''}); "
+            "led['actions'].append({'action': 'push', 'exit': 0}); led['outcome'] = 'COMPLETE'; led['extra'] = 1; "
+            "led['gates']['G1']['status'] = 'PASS'; led['gates']['G3']['status'] = 'PASS'; "
+            "led['gates']['G3']['commands'].append({'cmd': 'pytest', 'exit_code': 0, 'type': 'test', "
+            "'recorded_by': 'exec'}); "
+            "led['gates']['G4']['commands'].append({'cmd': 'forged', 'exit_code': 0, 'type': 'test', "
+            "'recorded_by': 'exec'}); "
+            "p.write_text(json.dumps(led)); raise SystemExit(3)" % str(gates))
+        before = self.ledger(run)
+        r = self.etk("exec", "G3", "--type", "test", "--run", str(run), "--", sys.executable, "-c", forge)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("discarded", r.stderr)
+        led = self.ledger(run)
+        for key in ("authorizations", "actions", "outcome", "acceptance_criteria", "findings"):
+            self.assertEqual(led[key], before[key], key)
+        self.assertNotIn("extra", led)
+        self.assertEqual((led["gates"]["G1"]["status"], led["gates"]["G3"]["status"]), ("NOT_RUN", "NOT_RUN"))
+        # appended command records survive (nested exec); the real one comes last, another gate's is marked
+        self.assertEqual([(c["cmd"], c["exit_code"]) for c in led["gates"]["G3"]["commands"]],
+                         [("pytest", 0), (shlex.join([sys.executable, "-c", forge]), 3)])
+        self.assertEqual(led["gates"]["G4"]["commands"][0]["recorded_by"], "nested-exec")
+        # a ledger the command corrupted or replaced with a symlink is restored, not followed
+        victim = self.dir / "victim.txt"
+        victim.write_text("keep me")
+        clobber = "import os; p = %r; os.remove(p); os.symlink(%r, p)" % (str(gates), str(victim))
+        r = self.etk("exec", "G3", "--type", "test", "--run", str(run), "--", sys.executable, "-c", clobber)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(victim.read_text(), "keep me")
+        self.assertFalse(gates.is_symlink())
+        self.assertEqual(len(self.ledger(run)["gates"]["G3"]["commands"]), 3)
+
+    def test_future_date_limits_match(self):
+        mods = {}
+        for name in ("etk_run", "discover"):
+            spec = importlib.util.spec_from_file_location(f"_t_{name}", ROOT / "scripts" / f"{name}.py")
+            mods[name] = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mods[name])
+        self.assertEqual(mods["etk_run"].FUTURE_SLACK, mods["discover"].FUTURE_SLACK)
 
     def test_exec_run_writes_into_the_given_run(self):
         first, _ = self.init()

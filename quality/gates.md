@@ -123,9 +123,11 @@ records each step:
 
 ```sh
 etk.sh run phase release                         # intake|implement|review|test|release|deploy|report|done
+etk.sh run ready                                 # exit 0 only when a release step may run now
 etk.sh run authorize --action merge --source prompt --quote "merge it when green" [--target main] [--condition pass]
+etk.sh run authorize --action push --source profile --data "${CLAUDE_PLUGIN_DATA}"
 etk.sh run act --action merge --target main --ref abc123 --url <pr> --command "gh pr merge 12" --exit 0
-etk.sh run act --action deploy --target web-eu --production --exit 0
+etk.sh run act --action deploy --target web-eu --production --data "${CLAUDE_PLUGIN_DATA}" --exit 0
 etk.sh run decide --id D1 --level L4 --question "Drop the legacy table?" --options "yes|no" --recommended no \
                   [--status pending|approved|autonomous|superseded] [--answer-quote "no, keep it"]
 ```
@@ -133,10 +135,25 @@ etk.sh run decide --id D1 --level L4 --question "Drop the legacy table?" --optio
 Each takes an optional trailing run path. New ledger fields: `phase`, `phase_history`,
 `authorizations` (`action`, `target`, `source`, `quote`, `condition`, `granted_at`),
 `actions` (`action`, `target`, `ref`, `url`, `command`, `exit`, `production`, `at`,
-`gates_ok`), `decisions` (upserted by `id`) and `profile_hash` (informational). Actions:
+`gates_ok`), `decisions` (upserted by `id`) and `profile_hash` (sha256 of the profile file a
+`--source profile` authorization was checked against). Actions:
 `commit|push|pr|merge|tag|deploy|rollback`. Sources: `prompt` / `answer` (the user's verbatim
 words in `quote`) or `profile` (the workflow profile; only for commit, push, pr).
-`gates_ok` is computed by `act`: G1–G6 settled, ACs met, no blocking finding.
+`authorize --source profile` needs `--data DIR` and checks the profile: `release.<action>`
+must be `auto` (a PR needs `release.integrate: pr` and `release.push: auto`), and `auto`
+values from a profile set up in another checkout or for another push URL don't count until
+the developer runs `profile confirm` here.
+
+`run ready [RUN]` exits 0 only when the release preconditions hold: every gate except G7 is
+PASS or a justified NOT_APPLICABLE, every AC is met, no open or disputed finding of medium
+severity or above, and no high/critical one left unverified. Otherwise it exits 1 and lists
+what is missing. `run check` is different: it only says the ledger is consistent, and an
+in-progress run with G3 FAIL is consistent. `act` computes `gates_ok` the same way and refuses
+(exit 2, nothing recorded) a commit/push/pr/merge/tag/deploy while `ready` would fail, unless
+`--force-record` is given to record a step that already happened (stored with `gates_ok:
+false`). With `--data`, `act --action deploy --target T` looks `T` up in the profile's
+`deploy.targets` and records `production: true` when the profile says so; the profile can
+add the flag, not remove it.
 
 `check` rejects:
 - an action with no authorization for the same action and target (an authorization without
@@ -144,7 +161,10 @@ words in `quote`) or `profile` (the workflow profile; only for commit, push, pr)
 - a commit/push/pr/merge/tag/deploy with `gates_ok: false`: released before the gates passed
   (rollback is exempt);
 - a merge/tag/deploy/rollback authorized only by the profile;
-- a `--production` deploy whose quote names neither the target nor production/prod/live.
+- a source-profile authorization without `profile_hash` (written by hand, not by `authorize`);
+- a `--production` deploy without an authorization for exactly that target, or whose quote
+  names neither the target nor production/prod/live as whole words (`-`/`_` count as part of
+  a word, so "web" isn't "web-staging"; a negated clause like "don't touch prod" doesn't count).
 
 - PASS: at least one recorded action, every one exit 0.
 - FAIL: an action failed.

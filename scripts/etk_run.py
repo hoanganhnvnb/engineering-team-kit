@@ -8,8 +8,10 @@
     etk_run.py latest                         # print the newest run dir
     etk_run.py exec G3 --type test [--run RUN_DIR] -- <cmd>   # run <cmd>, record its real exit code
     etk_run.py phase <name> [RUN]             # move the run to a phase (intake ... done)
-    etk_run.py authorize --action A --source S --quote "Q" [--target T] [--condition C] [RUN]
-    etk_run.py act --action A [--target T] [--ref R] [--url U] [--command C] --exit N [--production] [RUN]
+    etk_run.py ready [RUN]                    # exit 0 only if a release step may run now (else lists why)
+    etk_run.py authorize --action A --source S --quote "Q" [--target T] [--condition C] [--data DIR] [RUN]
+    etk_run.py act --action A [--target T] [--ref R] [--url U] [--command C] --exit N [--production]
+                   [--data DIR] [--force-record] [RUN]
     etk_run.py decide --id ID --level L0..L4 --question Q [--options "a|b"] [--recommended R]
                       [--status S] [--answer-quote Q] [RUN]
 
@@ -27,12 +29,18 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import datetime as dt
+import hashlib
 import json
+import os
 import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import etk_profile  # noqa: E402  (same directory)
 
 GATES = {
     "G1": "Requirements & acceptance criteria",
@@ -81,7 +89,12 @@ AUTH_SOURCES = {"prompt", "answer", "profile"}
 PROFILE_OK = {"commit", "push", "pr"}            # a workflow profile may pre-authorize only these
 NEEDS_USER_WORDS = {"merge", "tag", "deploy", "rollback"}  # need the user's own words (prompt/answer)
 GATED_ACTIONS = {"commit", "push", "pr", "merge", "tag", "deploy"}  # not before the gates pass
-PROD_WORDS = re.compile(r"\b(production|prod|live)\b", re.I)
+# Whole words, where `-` and `_` count as part of a word: "prod" doesn't match "prod-eu" or "nonprod".
+PROD_WORDS = re.compile(r"(?<![\w-])(production|prod|live)(?![\w-])", re.I)
+# A negation earlier in the same clause ("don't deploy to prod", "không deploy live").
+NEGATION = re.compile(r"(?<![\w-])(don['’]?t|do not|never|not|no|không|đừng)(?![\w-])", re.I)
+# How far ahead `latest` accepts a run name (clock skew); discover.previous_run uses the same.
+FUTURE_SLACK = dt.timedelta(days=1)
 DECISION_LEVELS = {"L0", "L1", "L2", "L3", "L4"}
 DECISION_STATUSES = {"pending", "approved", "autonomous", "superseded"}
 MIN_QUOTE = 3
@@ -259,7 +272,7 @@ def latest_run() -> Path | None:
         return None
     root = git_root()
     tracked = tracked_under_etk(root)
-    limit = dt.datetime.now() + dt.timedelta(days=1)
+    limit = dt.datetime.now() + FUTURE_SLACK
     runs = []
     for x in d.iterdir():
         m = RUN_NAME.match(x.name)
@@ -469,6 +482,20 @@ def _text(v) -> str:
     return v.strip() if isinstance(v, str) else ""
 
 
+def word(name: str) -> re.Pattern:
+    """`name` as a whole word; `-`/`_` are word characters, so "web" doesn't match "web-staging"."""
+    return re.compile(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", re.I)
+
+
+def affirms(quote: str, pattern: re.Pattern) -> bool:
+    """`pattern` occurs in `quote` outside a negated clause ("don't touch prod" doesn't count)."""
+    for m in pattern.finditer(quote):
+        clause = re.split(r"[.;,!?\n]", quote[:m.start()])[-1]
+        if not NEGATION.search(clause):
+            return True
+    return False
+
+
 def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, errors: list[str]) -> None:
     """Phase, authorizations, actions, decisions and G7. Absent fields (old ledgers) are fine."""
     if "phase" in ledger and ledger["phase"] not in PHASES:
@@ -490,6 +517,10 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
         if src == "profile" and act not in PROFILE_OK:
             errors.append(f"{label}: a workflow profile can only authorize {sorted(PROFILE_OK)}; "
                           f"{act} needs the user's own words (source prompt or answer)")
+            continue
+        if src == "profile" and not _text(au.get("profile_hash")):
+            errors.append(f"{label}: source profile without the profile's hash (record it with "
+                          "`authorize --source profile --data DIR`, which checks the profile says auto)")
             continue
         if src != "profile" and len(_text(au.get("quote"))) < MIN_QUOTE:
             errors.append(f"{label}: source {src} needs the user's verbatim words in 'quote'")
@@ -534,8 +565,13 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
                               "a workflow profile is not enough")
                 continue
         if act == "deploy" and ac["production"]:
-            if not any(PROD_WORDS.search(_text(au.get("quote")))
-                       or (target and target.lower() in _text(au.get("quote")).lower()) for au in match):
+            named = [au for au in match if target and _text(au.get("target")).lower() == target.lower()]
+            if not named:
+                errors.append(f"{label}: production deploy needs an authorization for exactly this target "
+                              f"(`authorize --action deploy --target {target or '<name>'}`), not a blanket one")
+                continue
+            if not any(affirms(_text(au.get("quote")), PROD_WORDS) or affirms(_text(au.get("quote")), word(target))
+                       for au in named):
                 errors.append(f"{label}: production deploy, but no authorization quote names the target "
                               "or says production/prod/live")
     if outcome == "COMPLETE":
@@ -569,14 +605,23 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
         errors.append(f"G7: NOT_APPLICABLE but {len(acts)} release action(s) were recorded")
 
 
-def gates_allow_release(ledger: dict) -> bool:
-    """Would the gates other than G7 let this run be COMPLETE right now?"""
+def release_blockers(ledger: dict) -> list[str]:
+    """What stops a release step right now: the run could not be COMPLETE on the gates other than G7.
+    That means every required gate but G7 is PASS or a justified NOT_APPLICABLE, every AC is met,
+    no medium+ finding is open or disputed and no high/critical one is unverified."""
+    if not isinstance(ledger, dict):
+        return ["the ledger is not a JSON object"]
     probe = json.loads(json.dumps(ledger))
     probe.update(outcome="COMPLETE", authorizations=[], actions=[], decisions=[])
     if isinstance(probe.get("gates"), dict):
         probe["gates"].pop("G7", None)
     errors, _ = validate(probe, skip=frozenset({"G7"}))
-    return not errors
+    return [e.removeprefix("COMPLETE but ") for e in errors]
+
+
+def gates_allow_release(ledger: dict) -> bool:
+    """Would the gates other than G7 let this run be COMPLETE right now?"""
+    return not release_blockers(ledger)
 
 
 def load(p: Path) -> dict:
@@ -603,6 +648,8 @@ def cmd_exec(a) -> int:
     if not isinstance(gate, dict) or not isinstance(gate.get("commands", []), list):
         print(f"{p}: gate {a.gate} is malformed; fix the ledger first", file=sys.stderr)
         return 2
+    before = json.loads(json.dumps(led))  # the ledger as the command found it
+    run_dir = p.parent.resolve()
     last = ""
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
@@ -614,17 +661,51 @@ def cmd_exec(a) -> int:
     except OSError as exc:
         last, rc = f"could not start: {exc}", 127
         print(last, file=sys.stderr)
-    led = load(p)  # the command may have recorded into this ledger itself (nested exec); don't overwrite that
-    gate = led.get("gates", {}).get(a.gate) if isinstance(led.get("gates"), dict) else None
-    if not isinstance(gate, dict) or not isinstance(gate.get("commands", []), list):
-        print(f"{p}: gate {a.gate} became malformed while the command ran; nothing recorded", file=sys.stderr)
-        return 2
-    gate.setdefault("commands", []).append({
+    if p.parent.is_symlink() or p.parent.resolve() != run_dir:
+        refuse(f"{p.parent} was replaced while the command ran; nothing recorded")
+    led, changed = merge_exec(before, read_after(p), a.gate)
+    if changed:
+        print(f"[etk] {p}: the command changed the ledger beyond appending gate commands; those changes "
+              "were discarded (only the Lead edits the ledger)", file=sys.stderr)
+    led["gates"][a.gate].setdefault("commands", []).append({
         "cmd": shlex.join(cmd), "type": a.type, "exit_code": rc, "last_line": last[:300], "recorded_by": "exec",
     })
-    p.write_text(json.dumps(led, indent=2) + "\n")
+    write_ledger(p, led)
     print(f"[etk] {a.gate}: recorded `{shlex.join(cmd)}` exit {rc} in {p}", file=sys.stderr)
     return rc
+
+
+def read_after(p: Path):
+    try:
+        return json.loads(p.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def merge_exec(before: dict, after, gate_name: str) -> tuple[dict, bool]:
+    """The ledger to write after `exec`: the snapshot taken before the command ran, plus command
+    records appended to gate `commands` lists while it ran (a nested `etk exec`).
+
+    The command is repository code (a test suite), so everything else it may have written into
+    the file (gate status, findings, authorizations, actions, other fields) is dropped. Records it
+    appended to another gate are kept but marked `recorded_by: nested-exec`, so `check` treats
+    their exit codes as self-reported. Returns (ledger, whether anything was discarded)."""
+    led, kept = json.loads(json.dumps(before)), json.loads(json.dumps(before))
+    after_gates = after.get("gates") if isinstance(after, dict) and isinstance(after.get("gates"), dict) else {}
+    for g, gate in led["gates"].items():
+        if not isinstance(gate, dict):
+            continue
+        old = gate.get("commands") if isinstance(gate.get("commands"), list) else []
+        other = after_gates.get(g)
+        new = other.get("commands") if isinstance(other, dict) else None
+        if not isinstance(new, list) or len(new) <= len(old) or new[:len(old)] != old:
+            continue
+        added = [c for c in new[len(old):] if isinstance(c, dict) and isinstance(c.get("cmd"), str)]
+        kept["gates"][g]["commands"] = old + added
+        if g != gate_name:
+            added = [dict(c, recorded_by="nested-exec", nested_in=gate_name) for c in added]
+        gate["commands"] = old + added
+    return led, after != kept
 
 
 def update_ledger(path: str | None, change) -> int:
@@ -635,9 +716,24 @@ def update_ledger(path: str | None, change) -> int:
     if not isinstance(led, dict):
         refuse(f"{p}: the ledger is not a JSON object; fix it first")
     msg = change(led)
-    p.write_text(json.dumps(led, indent=2) + "\n")
+    write_ledger(p, led)
     print(f"[etk] {msg}")
     return 0
+
+
+def write_ledger(p: Path, led: dict) -> None:
+    """Replace the ledger atomically; a symlink planted at gates.json is replaced, never followed."""
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".gates.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(led, indent=2) + "\n")
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def ledger_list(led: dict, key: str) -> list:
@@ -659,6 +755,26 @@ def cmd_phase(a) -> int:
     return update_ledger(a.path, change)
 
 
+def load_profile(raw_data: str | None) -> tuple[dict, Path, bytes | None, bool]:
+    """The workflow profile as etk_profile would act on it here; refuses (exit 2) on a bad --data."""
+    try:
+        return etk_profile.load_for(raw_data)
+    except etk_profile.UsageError as e:
+        refuse(f"profile: {e}")
+
+
+def profile_says_auto(prof: dict, action: str) -> str | None:
+    """Why the profile doesn't pre-authorize `action`, or None when it does."""
+    get = etk_profile.get
+    if action == "pr":
+        if get(prof, "release.integrate") != "pr" or get(prof, "release.push") != "auto":
+            return "a PR needs release.integrate pr and release.push auto"
+        return None
+    if get(prof, f"release.{action}") != "auto":
+        return f"release.{action} is {get(prof, f'release.{action}')!r}, not \"auto\""
+    return None
+
+
 def cmd_authorize(a) -> int:
     quote = (a.quote or "").strip()
     if a.source == "profile" and a.action not in PROFILE_OK:
@@ -666,24 +782,71 @@ def cmd_authorize(a) -> int:
                f"{a.action} needs the user's own words (--source prompt|answer)")
     if a.source != "profile" and len(quote) < MIN_QUOTE:
         refuse(f"--source {a.source} needs --quote with the user's verbatim words")
+    digest = None
+    if a.source == "profile":
+        if not a.data:
+            refuse("--source profile needs --data DIR (the plugin data dir) so the profile can be checked")
+        prof, path, raw, stale = load_profile(a.data)
+        if raw is None:
+            refuse(f"no workflow profile at {path}; --source profile needs one that says auto")
+        why = profile_says_auto(prof, a.action)
+        if why:
+            refuse(f"the workflow profile doesn't pre-authorize {a.action}: {why}"
+                   + (f" ({etk_profile.RECONFIRM})" if stale else ""))
+        digest = hashlib.sha256(raw).hexdigest()
 
     def change(led):
-        ledger_list(led, "authorizations").append({
-            "action": a.action, "target": a.target or "", "source": a.source, "quote": quote,
-            "condition": a.condition or "pass", "granted_at": now_iso()})
+        au = {"action": a.action, "target": a.target or "", "source": a.source, "quote": quote,
+              "condition": a.condition or "pass", "granted_at": now_iso()}
+        if digest:
+            au["profile_hash"] = digest
+            led["profile_hash"] = digest
+        ledger_list(led, "authorizations").append(au)
         return f"authorized {a.action}{' ' + a.target if a.target else ''} ({a.source}: {quote[:60]!r})"
     return update_ledger(a.path, change)
 
 
+def profile_production(raw_data: str, target: str) -> bool | None:
+    """deploy.targets[name == target].production from the profile, None when the target isn't there."""
+    prof, _, _, _ = load_profile(raw_data)
+    targets = etk_profile.get(prof, "deploy.targets")
+    for t in targets if isinstance(targets, list) else []:
+        if isinstance(t, dict) and isinstance(t.get("name"), str) and t["name"].strip().lower() == target.lower():
+            return t.get("production") is True
+    return None
+
+
+def cmd_ready(a) -> int:
+    p = resolve(a.path)
+    blockers = release_blockers(load(p))
+    if blockers:
+        print(f"NOT READY: {len(blockers)} thing(s) block a release step in {p}")
+        for b in blockers:
+            print(f"- {b}")
+        return 1
+    print(f"READY: {p} (every required gate but G7 settled, ACs met, no blocking finding)")
+    return 0
+
+
 def cmd_act(a) -> int:
+    production = a.production
+    if a.data and a.action in {"deploy", "rollback"} and a.target.strip():
+        # The profile knows which targets are production; it can only add the flag, never drop it.
+        production = profile_production(a.data, a.target.strip()) or production
+
     def change(led):
         actions = ledger_list(led, "actions")
-        ok = gates_allow_release(led)
+        blockers = release_blockers(led)
+        ok = not blockers
+        if a.action in GATED_ACTIONS and not ok and not a.force_record:
+            refuse(f"{a.action} refused: the run isn't ready for release (`run ready` fails): "
+                   + "; ".join(blockers[:5]) + ("; …" if len(blockers) > 5 else "")
+                   + ". Settle the gates first, or record a step that already happened with --force-record")
         actions.append({"action": a.action, "target": a.target or "", "ref": a.ref or "", "url": a.url or "",
-                        "command": a.command or "", "exit": a.exit, "production": a.production,
+                        "command": a.command or "", "exit": a.exit, "production": production,
                         "at": now_iso(), "gates_ok": ok})
         return (f"recorded {a.action}{' ' + a.target if a.target else ''} exit {a.exit}"
-                + ("" if ok else " (gates had not passed)"))
+                + (" (production)" if production else "") + ("" if ok else " (gates had not passed)"))
     return update_ledger(a.path, change)
 
 
@@ -909,7 +1072,7 @@ def main() -> int:
     i.add_argument("--kind", choices=["build", "fix", "review", "test", "improve-ui", "ship"], default="build")
     i.add_argument("--max-cycles", type=int, default=None, help="default: project config max_cycles, else 3")
     i.set_defaults(fn=cmd_init)
-    for name, fn in (("check", cmd_check), ("render", cmd_render)):
+    for name, fn in (("check", cmd_check), ("render", cmd_render), ("ready", cmd_ready)):
         s = sub.add_parser(name)
         s.add_argument("path", nargs="?")
         s.set_defaults(fn=fn)
@@ -932,12 +1095,17 @@ def main() -> int:
     au.add_argument("--quote", default="", help="the user's verbatim words (required unless --source profile)")
     au.add_argument("--target", default="")
     au.add_argument("--condition", default="pass")
+    au.add_argument("--data", default=None, metavar="DIR", help="plugin data dir; required for --source profile")
     ac = sub.add_parser("act", help="record a release action that was performed")
     ac.add_argument("--action", required=True, choices=RELEASE_ACTIONS)
     for opt in ("--target", "--ref", "--url", "--command"):
         ac.add_argument(opt, default="")
     ac.add_argument("--exit", required=True, type=int)
     ac.add_argument("--production", action="store_true")
+    ac.add_argument("--data", default=None, metavar="DIR",
+                    help="plugin data dir: a deploy target the profile marks production is recorded as production")
+    ac.add_argument("--force-record", action="store_true",
+                    help="record a step that already happened although `ready` fails (gates_ok false)")
     de = sub.add_parser("decide", help="record or update a decision by id")
     de.add_argument("--id", required=True)
     de.add_argument("--level", required=True, choices=sorted(DECISION_LEVELS))
