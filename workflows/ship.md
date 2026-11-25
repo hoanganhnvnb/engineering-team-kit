@@ -18,7 +18,8 @@ report what is missing, and ask.
   gate except G7 is PASS or a justified NOT_APPLICABLE, every AC is met, no open or
   disputed finding of medium severity or above, and no high/critical one left unverified.
   `run check` alone is not enough: an in-progress run with G3/G4 FAIL is a consistent
-  ledger. `run act` refuses commit/push/pr/merge/tag/deploy while `ready` fails; use
+  ledger. `run act` refuses commit/push/pr/merge/tag/deploy while `ready` fails (a local commit
+  is exempt only from the run-kind rule: review and test runs never push or deploy); use
   `--force-record` only to record a step that already happened (it is stored with
   `gates_ok: false` and `check` then fails the run).
 - G3/G4 were recorded through `etk exec`, not typed by hand.
