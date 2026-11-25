@@ -141,8 +141,10 @@ it, and plain prompts for trivial edits.
 
 ## Scope
 
-- ETK doesn't deploy, open PRs, or talk to issue trackers. It stops at "changes ready in your
-  working tree, with a report". Commit, push, and PR stay with you.
+- Only the Lead commits, pushes, merges or deploys, following your workflow profile and
+  the permission you gave in this conversation; subagents never do. Merge and deploy always
+  need your words, and production must be named. Bitbucket PRs are link-only (no CLI),
+  and SVN gets commit only. ETK doesn't talk to issue trackers.
 - The Lead decides the task size. It can be wrong in either direction. Tell it ("treat this
   as large", "no review needed") and it will follow you.
 - Project memory (`docs/agent/`) is only as good as what gets written there. Agents are told

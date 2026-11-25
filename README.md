@@ -132,7 +132,7 @@ For long tasks the Lead keeps short notes in `docs/agent/CURRENT_STATE.md` and
 
 ## What it won't do
 
-- Commit, push, merge, or deploy unless you ask.
+- Push, merge or deploy beyond what your workflow profile and your own words allow. Subagents never do any of it.
 - Touch uncommitted changes it didn't make.
 - Mark tests as passed that didn't run, or call anything "bug-free".
 - Claim it looked at your UI without a browser tool actually showing it.

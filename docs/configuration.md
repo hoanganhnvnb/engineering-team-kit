@@ -14,7 +14,7 @@ always sees it.
 | `ui.url` | string | Where to open it. |
 | `verify` | string[] | Commands that drive the real feature (smoke request, driver script). QA and the Lead run them and record them as `runtime` evidence. |
 | `max_cycles` | int | Review/fix cycles before escalating (default 3). |
-| `commit` | bool | `true` lets the Lead commit locally at the end (never push). Default `false`. |
+| `commit` | bool | Older setting: `true` lets the Lead commit locally at the end. Your [workflow profile](workflow.md) takes over once it exists. Push, merge and deploy are never read from this file. Default `false`. |
 | `invariants` | string[] | Business rules that must hold. Reviewers and QA check them (G4). |
 | `protected_paths` | string[] | Paths no agent changes without asking you first. The guard reads this file from the session's working directory and blocks ETK subagents (every role) from writing under these paths with Write/Edit or through the shell (redirects, `rm`, `mv`, `cp`, `sed -i`, `git rm`, and similar). Entries are paths, directories (`db/migrations/`) or globs (`infra/**`, `src/legacy/*.js`). It stops accidents, not a determined bypass: see [limitations](limitations.md#guard-hook). |
 | `rules` | object[] | Path-scoped invariants: `{"paths": "src/domain/**", "rule": "…", "check": "<cmd>"}`. Reviewers apply each rule to changed files matching `paths` and run `check` if present. Prefer rules with a `check`: prose-only rules are the weakest kind. |
@@ -26,8 +26,8 @@ Example: [`templates/engineering-team.json`](../templates/engineering-team.json)
 
 ## Where rules come from (priority order)
 
-1. Safety rules (no secrets, no push/deploy/destructive actions without you, no
-   discarding your changes). These can't be overridden by project config.
+1. Safety rules (no secrets, no push/merge/deploy beyond what your workflow profile and
+   your own words allow, no destructive actions, no discarding your changes). These can't be overridden by project config.
 2. Your instructions in the conversation.
 3. Project instructions: CLAUDE.md files, `.claude/rules/`, AGENTS.md, and this config file.
 4. ETK defaults (the workflows and quality docs in this repo).

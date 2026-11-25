@@ -39,8 +39,11 @@ Disputed/accepted items with the reason.
 **Needs your decision** (only if any)
 - <decision with a recommendation>
 
-**Left for you**
-- Changes are uncommitted on branch `<branch>` (or: committed locally as `<sha>`, not pushed).
+**Shipped** (only what actually happened, from the ledger's actions)
+- commit `<sha>` · pushed `<branch>` · PR <url> · deployed `<target>` (verify: <result>)
+
+**Left for you** (what wasn't done, and why)
+- e.g. Not pushed: no push permission and profile says `confirm`. / Deploy skipped: no target in the profile.
 - Run ledger: `.etk/runs/<id>/gates.json`
 ```
 

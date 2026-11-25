@@ -47,7 +47,7 @@ Cách ghim version, cài cho cả team, nâng cấp, rollback và gỡ cài đ�
 - Tin vào bằng chứng, không tin vào lời tự báo cáo. Reviewer đọc diff thật, Lead tự chạy lại test.
 - Quy tắc quan trọng được kiểm tra bằng script (`etk_run.py check`, guard hook), không chỉ viết bằng lời.
 - Rule của project là ưu tiên cao nhất trong phạm vi của nó. Plugin chỉ áp dụng rule Shopify khi phát hiện project thật sự là Shopify.
-- Không tự commit/push/deploy, không đụng vào thay đổi chưa commit của bạn.
+- Chỉ Lead mới commit/push/merge/deploy, theo workflow profile của bạn và lời cho phép trong cuộc trò chuyện; subagent không bao giờ làm. Không đụng vào thay đổi chưa commit của bạn.
 - Mỗi vai trò dùng model phù hợp: `scout` (haiku) tìm file và xuất dữ liệu, `qa-engineer` (sonnet) chạy test và chạy thử, `code-reviewer` và `tech-writer` (opus) review và viết tài liệu, `developer`/`ux-reviewer` dùng model của phiên. Có thể đổi bằng `models` trong config.
 - Test chứng minh code, chạy thật mới chứng minh tính năng: developer và QA chạy thử thay đổi và ghi bằng chứng `runtime`.
 - Mỗi lỗi từ mức medium có đề xuất `hardening`, tức kiểm tra tự động rẻ nhất để lỗi đó không lặp lại. Chỉ đề xuất, bạn quyết định có áp dụng hay không.
