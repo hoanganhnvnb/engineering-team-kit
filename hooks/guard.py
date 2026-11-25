@@ -872,6 +872,7 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             check_bash(body, root, role, depth + 1, cur)
         words, outputs = program_ex(seg.words)
         in_pipe = seg.sep in {"|", "|&"} or seg.after in {"|", "|&", "&"}
+        bg_reset = pending and seg.after == "&"  # a backgrounded list runs in a subshell
         if pending and not in_pipe and seg.sep in {";", "||"}:
             cur, dirs[:], pending = None, ["?"], False
         check_startup_hook_vars(seg.words, words)
@@ -890,10 +891,14 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
                     cur, dirs[:], pending = None, ["?"], False
                 else:
                     cur, pending = new, True
+            if bg_reset:
+                cur, dirs[:], pending = None, ["?"], False
             continue
         if not in_pipe and any(os.path.basename(w) in {"cd", "pushd", "popd"} for w in words[1:]):
             cur = None  # a cd we can't attribute (find -exec cd, xargs cd): stay strict
         check_words(words, root, role, depth, cur, seg, outputs)
+        if bg_reset:
+            cur, dirs[:], pending = None, ["?"], False
         if words and os.path.basename(words[0]) == "trap" and not in_pipe:
             trapped = True
         if words and os.path.basename(words[0]) in {"eval", "source", ".", "trap"} and not in_pipe:

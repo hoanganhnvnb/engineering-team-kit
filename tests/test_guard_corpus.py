@@ -504,8 +504,18 @@ NESTED_TIME_OUTPUT = (
      ("dev", "find . -name x -exec time -o /tmp/t npm test \\;", "allow")]
 )
 
+# A cd inside a backgrounded list doesn't move the parent shell.
+BACKGROUND_CD = (
+    [("dev", c, "block") for c in [
+        "cd src && ls & rm -rf ../x",
+        "cd src && cd .. & rm -rf ../x",
+        "cd /tmp && sleep 1 & rm -rf build",
+    ]]
+    + [("dev", c, "allow") for c in ["npm test & npm run lint", "cd src && ls && rm -rf build", "cd /tmp && ls & rm -rf /tmp/x"]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD)
 
 
 def make_project(base: Path) -> Path:
