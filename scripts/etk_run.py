@@ -34,7 +34,7 @@ GATES = {
 }
 STATUSES = {"PASS", "FAIL", "BLOCKED", "NOT_RUN", "NOT_APPLICABLE"}
 SEVERITIES = ["critical", "high", "medium", "low"]
-FINDING_STATUSES = {"open", "fixed", "verified", "disputed", "accepted_risk", "wont_fix"}
+FINDING_STATUSES = {"open", "fixed", "verified", "disputed", "accepted_risk", "wont_fix", "invalid"}
 BLOCKING = {"critical", "high"}
 OUTCOMES = {"COMPLETE", "INCOMPLETE", "BLOCKED", "IN_PROGRESS"}
 # Gates that can only be NOT_APPLICABLE with a real reason, never skipped silently.
@@ -276,7 +276,7 @@ def _validate(ledger: dict) -> tuple[list[str], list[str]]:
                 errors.append(f"finding {fid}: hardening.layer must be one of {sorted(HARDENING_LAYERS)}")
             elif not isinstance(h.get("proposal"), str) or not h["proposal"].strip():
                 errors.append(f"finding {fid}: hardening.proposal must be a non-empty string")
-        if f.get("status") in {"disputed", "accepted_risk", "wont_fix"} and not str(f.get("resolution", "")).strip():
+        if f.get("status") in {"disputed", "accepted_risk", "wont_fix", "invalid"} and not str(f.get("resolution", "")).strip():
             errors.append(f"finding {fid}: status {f.get('status')} needs a 'resolution' explaining why")
 
     cycles, max_cycles = ledger.get("cycles", 0), ledger.get("max_cycles", 3)
@@ -358,7 +358,10 @@ def cmd_render(a) -> int:
         print("\n| ID | Sev | Status | Location | Summary |\n|---|---|---|---|---|")
         order = {s: i for i, s in enumerate(SEVERITIES)}
         for f in sorted(findings, key=lambda f: order.get(f.get("severity"), 9)):
-            summary = " ".join(str(f.get("actual", "")).split())[:90].replace("|", "/")
+            summary = " ".join(str(f.get("actual", "")).split())[:90]
+            if f.get("status") == "invalid":
+                summary = f"not a real finding: {' '.join(str(f.get('resolution', '')).split())[:90]}"
+            summary = summary.replace("|", "/")
             print(f"| {f.get('id')} | {f.get('severity')} | {f.get('status')} | `{f.get('location')}` | {summary} |")
     hard = [f for f in findings if isinstance(f.get("hardening"), dict)]
     if hard:

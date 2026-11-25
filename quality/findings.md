@@ -55,7 +55,8 @@ them in one line or skip them. Every extra finding costs a fix cycle.
 ```
 open ──► fixed ──► verified          (reviewer re-checked the code/test)
   │        └────► open               (re-check failed; same ID, note added)
-  ├────► disputed ──► Lead decides ──► open | wont_fix
+  ├────► disputed ──► Lead decides ──► open | wont_fix | invalid
+  ├────► invalid                     (the finding is wrong; evidence in `resolution`)
   └────► accepted_risk               (critical/high: only with the user's explicit OK)
 ```
 
@@ -68,4 +69,10 @@ open ──► fixed ──► verified          (reviewer re-checked the code/t
 - **The Lead** settles disputes by checking the evidence and writes the reason in
   `resolution`. When reviewer and project rules disagree, the project rules win.
   When reviewer and developer disagree on facts, run the test.
-- `wont_fix`, `disputed` and `accepted_risk` always carry a `resolution`.
+- `invalid` means the finding itself is wrong (the code does not behave as claimed, or the
+  cited location is not what the reviewer read). The Lead sets it after checking, and
+  `resolution` holds the evidence: a test result, the code quote, a project rule. It never
+  needs the user's approval, even on critical/high, because nothing is being accepted: there
+  is no problem. If the problem is real but won't be fixed, that is `wont_fix`. The report
+  lists invalid findings so the user can see what was dropped and why.
+- `wont_fix`, `disputed`, `accepted_risk` and `invalid` always carry a `resolution`.

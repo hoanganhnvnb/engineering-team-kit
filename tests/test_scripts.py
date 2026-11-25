@@ -227,6 +227,20 @@ class LedgerTests(unittest.TestCase):
         self.write(run, ledger)
         self.assertIn("high finding R1-001 is open", self.check(run).stdout)
 
+    def test_invalid_finding_needs_evidence_but_not_the_user(self):
+        run, ledger = self.init()
+        ledger = self.complete_ledger(ledger)
+        ledger["findings"] = [self.finding(status="invalid")]
+        self.write(run, ledger)
+        self.assertIn("status invalid needs a 'resolution'", self.check(run).stdout)
+        ledger["findings"][0]["resolution"] = "f(0) returns 0: test test_zero passes on this commit"
+        self.write(run, ledger)
+        r = self.check(run)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        out = sh([sys.executable, str(ETK), "render", str(run)], self.dir).stdout
+        self.assertIn("| R1-001 | high | invalid |", out)
+        self.assertIn("test_zero passes", out)
+
     def test_malformed_ledger_gives_messages_not_tracebacks(self):
         run, ledger = self.init()
         ledger = self.complete_ledger(ledger)
