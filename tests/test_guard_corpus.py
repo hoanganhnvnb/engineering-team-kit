@@ -998,7 +998,18 @@ MCP_CASES = [(r, t, "block") for r in ("dev", "rev", "qa") for t in [
 ]]
 
 
+def repo_under_system_temp() -> bool:
+    return Path(tempfile.gettempdir()).resolve() in ROOT.resolve().parents
+
+
 class GuardCorpus(unittest.TestCase):
+    def skip_if_repo_under_temp(self):
+        # The fixture sits under tests/, so a checkout inside the system temp dir puts the
+        # "project" inside what the guard treats as scratch space and escape cases misjudge.
+        if repo_under_system_temp():
+            self.skipTest(f"repo is under the system temp dir ({tempfile.gettempdir()}); "
+                          "clone it elsewhere to run the escape-from-project cases")
+
     @classmethod
     def setUpClass(cls):
         # Outside the system temp dir, which the guard treats as scratch space.
@@ -1016,6 +1027,7 @@ class GuardCorpus(unittest.TestCase):
             return "block" if guard.decide(data) is not None else "allow"
 
     def test_inherited_cdpath_makes_relative_cd_unknown(self):
+        self.skip_if_repo_under_temp()
         with mock.patch.dict(os.environ, {"CDPATH": "/etc"}):
             self.assertEqual(self.verdict("dev", "cd src && rm -rf build"), "block")
             self.assertEqual(self.verdict("dev", "cd ./src && rm -rf build"), "allow")
@@ -1030,6 +1042,7 @@ class GuardCorpus(unittest.TestCase):
         self.assertIsNone(guard.decide(data), "main session is not guarded")
 
     def test_protected_paths_apply_to_write_tools(self):
+        self.skip_if_repo_under_temp()
         for role in ROLES:
             for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
                 for path in ("db/migrations/002.sql", "infra/a/b.tf", "LICENSE", str(self.project / "LICENSE"),
@@ -1086,6 +1099,7 @@ class GuardCorpus(unittest.TestCase):
         self.assertIn("mcp__.*", matcher.split("|"))
 
     def test_corpus(self):
+        self.skip_if_repo_under_temp()
         for role, cmd, want in CASES:
             with self.subTest(role=role, cmd=cmd):
                 self.assertEqual(self.verdict(role, cmd), want)
