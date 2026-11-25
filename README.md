@@ -41,14 +41,9 @@ Restart Claude Code, open a project, and ask for something:
 add CSV export to the orders report; open a PR once review passes
 ```
 
-On the first run in a project, Claude detects your git host, branches and commit style.
-It asks once, in one or two short rounds, about what it can't detect: PR or direct
-merge, and how you deploy, if you do. It saves the answers to your per-developer
-profile, outside the repo.
-
-Pinning, team-wide setup, upgrades and rollback are in [docs/install.md](docs/install.md).
-
-## Demo
+On the first run in a project, Claude detects your git host, branches and commit style,
+asks once about what it can't detect (PR or direct merge, how you deploy), and saves the
+answers to your own profile, outside the repo. More in [docs/install.md](docs/install.md).
 
 ![A team run: plan, review, tests, commit, push, deploy](docs/assets/demo.gif)
 
@@ -56,153 +51,60 @@ Pinning, team-wide setup, upgrades and rollback are in [docs/install.md](docs/in
 
 | | Plain prompt | Engineering Team Kit |
 |---|---|---|
-| Review | The same context that wrote the code | A fresh reviewer that sees only the diff and the acceptance criteria |
-| "Tests pass" | Taken on trust | A ledger records each command and its exit code; `check` refuses a PASS that has no evidence |
-| Loop | Ends when it feels done | Continues until the gates pass, or the cycle cap is hit and it says INCOMPLETE |
-| Shipping | Pushes whenever asked, including half-done work | Commits only this run's files, after the gates pass; merge and deploy need your words; production must be named |
-| Your rules | Sometimes remembered | The snapshot lists CLAUDE.md, rules, skills, CI and hard checks; project rules win |
-| Subagents | Can do anything you can | A guard hook keeps them from pushing, deploying, touching secrets or editing outside the project |
+| Review | The context that wrote the code | A fresh reviewer that sees only the diff and the acceptance criteria |
+| "Tests pass" | Taken on trust | Each command and exit code is recorded; a PASS without evidence fails the check |
+| Shipping | Whenever asked | Only this run's files, after the gates pass; merge and deploy need your words |
+| Subagents | Can do anything you can | A guard hook keeps them from pushing, deploying or touching secrets |
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `/engineering-team:team <task>` (or just ask) | Whole task: implement → review → test/fix until pass → commit, push, PR, deploy as your profile and your words allow |
-| `/engineering-team:build <feature>` | Feature loop up to gates and a report |
-| `/engineering-team:fix <bug>` | Reproduce with a failing test first, fix the root cause, prove there's no regression |
-| `/engineering-team:review [ref\|PR\|path] [--fix]` | Independent read-only review with verified findings; `--fix` runs the fix loop |
-| `/engineering-team:test [scope\|regression]` | QA pass: run the real suites, probe edge cases, separate new failures from pre-existing ones |
-| `/engineering-team:improve-ui <screen> [problem]` | Before/after UX review with browser evidence, then implement and re-verify |
-| `/engineering-team:retro [last N]` | Recurring findings, trust trend, and the 1–3 hard checks worth adding |
-
-`team` is the only command Claude may start on its own. The others run when you type
-them. Agents follow a compact [conventions pack](docs/conventions.md) (commits, naming,
-style, API, database, versioning…) unless your project says otherwise.
+| `/engineering-team:team <task>` (or just ask) | Implement → review → test/fix until pass → commit, push, PR, deploy as you allow |
+| `/engineering-team:build <feature>` | Feature loop up to the gates and a report |
+| `/engineering-team:fix <bug>` | Failing test first, root-cause fix, no regressions |
+| `/engineering-team:review [ref\|PR\|path] [--fix]` | Independent read-only review; `--fix` runs the fix loop |
+| `/engineering-team:test [scope\|regression]` | QA pass: real suites, edge cases, new vs pre-existing failures |
+| `/engineering-team:improve-ui <screen>` | Before/after UX review in a browser, then fix and re-verify |
+| `/engineering-team:retro [last N]` | Recurring findings and the checks worth adding |
 
 ## How it works
 
 ```
-           ┌──────────── Lead (your main session) ─────────────┐
- request → │ discover → acceptance criteria → size: S / M / L  │
-           └───────┬───────────────────────────────────────────┘
-     small         │ medium                    │ large
-  Lead does it     ▼                           ▼
-  + self-review  developer ──► reviewer    contract + file-disjoint workstreams
-                    ▲            │  (+QA, +UX)   developers in git worktrees
-                    └─ findings ◄┘           → integrate → reviewer/QA on the whole
-                     (max 3 cycles)
-                           │
-                gates G1–G6 in a ledger → `etk run check` → release (G7) → report
+ request → Lead: discover → acceptance criteria → size S / M / L
+             small: Lead alone │ medium: developer ⇄ reviewer (+QA, +UX) │ large: parallel worktrees
+                           gates G1–G6 in a ledger → `etk run check` → release (G7) → report
 ```
 
-- **Sizing.** 1–2 obvious files: the Lead just does it. Real logic or anything
-  security-sensitive: developer + independent reviewer. Several independent parts:
-  a contract first, then parallel developers in isolated worktrees.
-  ([routing](workflows/routing.md))
-- **Independent review.** The reviewer gets the base ref and the acceptance
-  criteria, never the developer's summary, and it can't edit files. Each fix round
-  goes to a fresh developer, and a fresh reviewer verifies it.
-  ([review loop](workflows/review-loop.md), [findings](quality/findings.md))
-- **Gates with teeth.** G1 requirements · G2 review · G3 tests · G4 regression · G5
-  UI/a11y · G6 security. Each is PASS / FAIL / BLOCKED / NOT_RUN / NOT_APPLICABLE
-  with evidence. `scripts/etk_run.py check` rejects a test gate marked PASS without
-  a recorded command and exit code 0, a COMPLETE run with an open high-severity
-  finding, a fix nobody verified, and so on. ([gates](quality/gates.md))
-- **Your project wins.** Before planning, a discovery snapshot lists your
-  CLAUDE.md/AGENTS.md/rules files, project skills and agents, architecture docs, test
-  commands, CI config, and uncommitted changes. Project rules override ETK
-  defaults. If your project has its own reviewer agent or a migrations skill, the
-  team uses it. Shopify conventions show up only when the snapshot finds a Shopify
-  app or theme. ([discovery](workflows/discovery.md))
-- **The right model for each job.** Six agents, each with a default model matched to
-  the work: a cheap `scout` (haiku) gathers facts and exports run data, `qa-engineer`
-  (sonnet) runs and drives things, `code-reviewer` and `tech-writer` (opus) do the
-  judgement and the writing, and `developer`/`ux-reviewer` use your session's model.
-  Security-sensitive changes get a second reviewer with a security lens; disputed
-  critical findings get a tie-breaker on a different model.
-  ([routing](workflows/routing.md))
-- **Run it, don't just test it.** Tests prove code; running the feature proves the
-  feature. Developers and QA drive the change for real (a request, a CLI call, a browser
-  step) and record it as `runtime` evidence. The checker warns when a medium/large build
-  finishes without any. A `docs/agent/FEATURES.md` map keeps the "how to reach it, how to
-  prove it" steps reusable.
-- **Make it stick.** Every medium+ finding carries a `hardening` proposal: the cheapest
-  automatic check (lint rule, type, test, CI step) that would have caught it. The snapshot
-  shows which hard checks the project already has and warns when they're thin, because
-  agents copy whatever patterns they find. `/engineering-team:retro` turns repeated findings
-  into a short ratchet plan. ([hardening](quality/hardening.md))
-- **Seatbelt.** A hook stops the plugin's own subagents from pushing, deploying,
-  publishing, rewriting history, discarding changes, running `git stash`, or writing
-  `.env`/key files, or anything in your `protected_paths`. It also keeps reviewers read-only,
-  even through the shell, and refuses write-style MCP tools. Your main session, other plugins
-  and agents you map in through config aren't affected: the hook's shell wrapper exits right
-  away for them.
-  ([guard](hooks/guard.py))
+- **Independent review.** The reviewer never sees the developer's summary and can't edit
+  files. Each fix is verified by a fresh reviewer. ([review loop](workflows/review-loop.md))
+- **Gates with evidence.** Requirements, review, tests, regression, UI and security, each
+  backed by commands and exit codes. ([gates](quality/gates.md))
+- **Your project wins.** Its CLAUDE.md, rules, skills, CI and commands come first; agents
+  follow a small [conventions pack](docs/conventions.md) only where the project is silent.
+- **Seatbelt, not sandbox.** A hook keeps the plugin's subagents from pushing, deploying,
+  rewriting history or writing secrets. ([limitations](docs/limitations.md))
 
-## Optional project config
-
-Nothing is required. If you want to pin commands, invariants, or the UI URL, add
-`.claude/engineering-team.json` to the project ([template](templates/engineering-team.json),
-[reference](docs/configuration.md)):
-
-```json
-{
-  "commands": { "test": "pnpm test", "lint": "pnpm lint", "typecheck": "pnpm tsc --noEmit" },
-  "ui": { "start": "pnpm dev", "url": "http://localhost:3000" },
-  "invariants": ["Order totals are computed server-side only"],
-  "protected_paths": ["prisma/migrations/"],
-  "rules": [{ "paths": "src/domain/**", "rule": "No imports from src/infra", "check": "pnpm depcruise src" }],
-  "verify": ["curl -sf http://localhost:3000/api/health"],
-  "models": { "developer": "sonnet" }
-}
-```
-
-For long tasks the Lead keeps short notes in `docs/agent/CURRENT_STATE.md` and
-`DECISIONS.md`, only when it's useful and without duplicating your existing docs
-([project memory](workflows/project-memory.md)).
-
-## What it won't do
-
-- Push, merge or deploy beyond what your workflow profile and your own words allow.
-  Subagents never do any of it.
-- Touch uncommitted changes it didn't make.
-- Mark tests as passed when they didn't run, or call anything "bug-free".
-- Claim it looked at your UI without a browser tool actually showing it. Without one,
-  G5 is `BLOCKED` and the report says "static review only".
+Optional per-project settings (test commands, UI URL, invariants, protected paths) go in
+`.claude/engineering-team.json`: see [docs/configuration.md](docs/configuration.md).
 
 ## FAQ
 
-**Will it push to my main branch?** Only if your profile says trunk-based and push is
-`auto`, or you asked. Pushing to a protected or default branch while you use feature
-branches always needs a yes from you. It never force-pushes or skips hooks.
+**Will it push to my main branch?** Only if your profile is trunk-based with push `auto`,
+or you asked. It never force-pushes or skips hooks.
 
-**Where is my profile, and can my team see it?** It's in
-`~/.claude/plugins/data/engineering-team-engineering-team-kit/projects/<key>/profile.json`, on your machine only.
-To find it, run the plugin's `scripts/etk.sh profile path --data ~/.claude/plugins/data/engineering-team-engineering-team-kit`.
-Delete the file to reset.
+**Where is my profile?** On your machine only, in
+`~/.claude/plugins/data/engineering-team-engineering-team-kit/projects/`. Delete it to reset.
 
-**Does it work without GitHub?** Yes. GitLab uses `glab`. With Bitbucket, or without a
-signed-in CLI, you get the PR link to open yourself. SVN gets commits only. With no VCS,
-the release steps are skipped.
+**Without GitHub?** GitLab uses `glab`; Bitbucket gets a PR link; SVN gets commits only.
 
-**How much does a run cost?** A small fix takes about a minute and under a dollar. A
-large parallel build has run about 12 minutes and $4. Numbers are in
-[docs/validation.md](docs/validation.md).
-
-**Is the guard a sandbox?** No. It's a seatbelt against the mistakes agents actually
-make. For untrusted code, use a container. See [docs/limitations.md](docs/limitations.md).
+**Cost?** A small fix is about a minute and under a dollar. See [validation](docs/validation.md).
 
 ## Docs
 
-- [Running a task end to end](docs/workflow.md): phases, profile, who may do what
-- [Conventions pack](docs/conventions.md)
-- [Usage examples](docs/usage.md), including Shopify and non-Shopify projects
-- [Configuration](docs/configuration.md)
-- [Architecture and design decisions](docs/architecture.md)
-- [Principles](docs/principles.md): where the ideas come from
-- [Validation results](docs/validation.md)
-- [Known limitations](docs/limitations.md)
-- [Evals](evals/README.md): behaviour tests for the skills
+[Workflow](docs/workflow.md) · [Conventions](docs/conventions.md) · [Usage](docs/usage.md) ·
+[Configuration](docs/configuration.md) · [Architecture](docs/architecture.md) ·
+[Validation](docs/validation.md) · [Limitations](docs/limitations.md) · [Evals](evals/README.md)
 
 ## Contributing
 
