@@ -3,13 +3,15 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
-## Unreleased
+## 0.5.1
 
-- Guard: a wildcard pattern is expanded only when it can reach `~/.claude` or a Python folder;
-  `**` or more than two wildcard parts there is blocked, so a pattern can't stall the hook.
-  Patterns with up to two wildcard parts are always expanded and every match is checked, so a
-  symlink inside the wildcard can't hide a guarded folder. A `..` after a wildcard, or a part such
-  as `.*` that can match it, is blocked.
+- **Security (guard):** hardening of the `~/.claude` and Python-folder protection added in 0.5.0.
+  - A wildcard with up to two wildcard parts and no `**` is expanded and every match is
+    checked (at most 256), so a symlink inside the wildcard can't hide a guarded folder.
+  - A deeper pattern, or one with `**`, is blocked when its fixed part leads into a guarded
+    folder, so it can't stall the hook.
+  - A `..` after a wildcard, or a part such as `.*` that can match it, is blocked.
+  - Known gap: a symlink hidden in a deep wildcard part. See `docs/limitations.md`.
 
 ## 0.5.0
 

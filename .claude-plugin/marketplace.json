@@ -10,7 +10,7 @@
     {
       "name": "engineering-team",
       "description": "Lead + developer, reviewer, QA and UX agents with an evidence-based review loop and quality gates.",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "source": "./",
       "category": "development",
       "keywords": [
