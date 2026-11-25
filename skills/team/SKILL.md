@@ -1,6 +1,6 @@
 ---
 name: team
-description: Run a whole engineering task end to end with the AI team. Covers implement or fix, independent review, test and fix until it passes, then commit, push, PR and deploy as the developer's workflow profile and the user's own words allow. Use when the user asks to build, fix, ship, release or deploy code in this project, or to continue such a run ("làm X, review pass thì push", "fix bug Y rồi deploy staging", "tiếp tục"). Not for questions or explanations.
+description: Run a whole engineering task end to end with the AI team. Covers implement or fix, independent review, test and fix until it passes, then commit, push, PR and deploy as the developer's workflow profile and the user's own words allow. Use when the user asks to build, fix, ship, release or deploy code in this project, or to continue such a run ("build X, push once review passes", "fix bug Y then deploy to staging", "continue"). Not for questions or explanations.
 argument-hint: <task, and what may happen after it passes>
 allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" discover:*), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run:*), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" profile:*)
 ---
@@ -25,7 +25,7 @@ Record each phase change with `etk.sh run phase <name> RUN`. `RUN` is the direct
 `run init` printed. Pass it to every ledger command.
 
 1. **intake**
-   - "tiếp tục" / "continue": run `etk.sh run latest`, then `etk.sh run render <that
+   - "continue": run `etk.sh run latest`, then `etk.sh run render <that
      dir>` and read its **Outcome** and **Phase**. If the outcome is `IN_PROGRESS`,
      resume that run from its phase. Re-confirm any authorization it carries before
      you rely on it.

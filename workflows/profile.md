@@ -12,7 +12,7 @@ of the skill you are running; write that literal path. Below, `profile` is short
 ## When to read this file
 
 Read it when the snapshot's **Workflow profile** block says `missing: …`, or when the
-user says how they work now ("đổi sang tạo PR nhé", "from now on merge directly").
+user says how they work now ("switch to opening PRs", "from now on merge directly").
 Otherwise the brief profile in the snapshot is all you need.
 
 ## Onboarding

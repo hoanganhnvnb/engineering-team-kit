@@ -41,7 +41,7 @@ etk run authorize --action deploy --target staging --source prompt \
 | commit, push, pr | the profile says `auto` (`--source profile --data …`; checked against the profile, and a PR needs `integrate: pr` plus `push: auto`), or the user's words |
 | merge, tag, deploy, rollback | the user's words only: this prompt (`prompt`) or an answer to your question (`answer`) |
 
-- Quote the user verbatim. "review xong không lỗi, pass thì deploy staging luôn" is
+- Quote the user verbatim. "once review finds nothing and tests pass, deploy to staging" is
   permission to deploy staging, on the condition that the run passes.
 - A bare "deploy" means the single non-production target. Production needs the user
   to name it, and its own authorization with `--target <that target>`.
