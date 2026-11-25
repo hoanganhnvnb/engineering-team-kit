@@ -123,6 +123,17 @@ class PluginStructure(unittest.TestCase):
                 self.assertNotIn("exec", allowed)
                 self.assertNotIn("etk_run.py", allowed)
 
+    def test_ci_matches_the_supported_platforms_and_tools(self):
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        self.assertIn('python-version: "3.12"', ci)
+        self.assertIn("ubuntu-latest", ci)
+        self.assertIn("macos-latest", ci)
+        for wrapper in ("scripts/etk.sh", "hooks/run-guard.sh", "evals/run.sh"):
+            self.assertIn(f"sh -n {wrapper}", ci)
+        built_on = re.search(r"built and tested on (\d+\.\d+\.\d+)", (ROOT / "README.md").read_text())
+        self.assertTrue(built_on, "README must say which Claude Code version it was built on")
+        self.assertIn(f"@anthropic-ai/claude-code@{built_on.group(1)}", ci)
+
     def test_versions_agree(self):
         entry = next(p for p in MARKET["plugins"] if p["name"] == NAME)
         self.assertEqual(entry.get("version"), PLUGIN["version"])

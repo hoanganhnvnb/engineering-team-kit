@@ -7,18 +7,27 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - name: Parse the POSIX wrappers
+        run: |
+          sh -n scripts/etk.sh
+          sh -n hooks/run-guard.sh
+          sh -n evals/run.sh
       - name: Unit and structure tests
         run: python3 -m unittest discover -s tests -v
       - name: Validate plugin and marketplace manifests
         run: |
-          npm install -g @anthropic-ai/claude-code
+          npm install -g @anthropic-ai/claude-code@2.1.329
           claude plugin validate . --strict
