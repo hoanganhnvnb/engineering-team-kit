@@ -477,7 +477,6 @@ TRAP_STRICT = (
 STARTUP_VARS = (
     [("dev", c, "block") for c in [
         "BASH_ENV=x.sh npm test",
-        "ENV=x.sh sh script.sh",
         "PS4='x' bash -x s.sh",
         "PS0=x true",
         "export PS0=x",
@@ -493,6 +492,34 @@ STARTUP_VARS = (
         "export 'PS4[1]=x'",
     ]]
     + [("dev", c, "allow") for c in ["NODE_ENV=test npm test", "echo ENV", "git grep -n ENV src", "export FOO=1"]]
+)
+
+# Names that only look like assignments (arguments, not leading assignments) are not assignments.
+ENV_LOOKALIKES = (
+    [("dev", c, "allow") for c in [
+        "ENV=test npm test",
+        "export ENV=staging",
+        "docker run -e ENV=prod app",
+        "make test ENV=ci",
+        "grep -rn ENV= src",
+        "git log -S ENV=prod",
+        "rg PROMPT_COMMAND= .",
+        "rg BASH_ENV= .",
+        "grep -rn HOME= .",
+        "git grep -n GIT_DIR= hooks",
+        "rg UPDATE_SNAPSHOTS= .",
+        "docker run -e PS4=x app",
+    ]]
+    + [(r, c, "allow") for r in ("rev", "qa") for c in [
+        "grep -rn HOME= .",
+        "git grep -n GIT_DIR= hooks",
+        "rg UPDATE_SNAPSHOTS= .",
+        "rg GIT_PAGER= .",
+        "grep -rn PS4= src",
+        "make test HOME=/tmp/x",
+        "ENV=test npm test",
+    ]]
+    + [("dev", c, "block") for c in ["env PS4=x npm test", "sudo env BASH_ENV=x.sh ls", "timeout 5 env PS0=x ls"]]
 )
 
 # Wrapper write targets inside nested commands.
@@ -1078,7 +1105,7 @@ GIT_ENV = (
 )
 
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES)
 
 
 def make_project(base: Path) -> Path:

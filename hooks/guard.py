@@ -371,12 +371,17 @@ def known_wrapper_option(base: str, opt: str) -> bool:
     return len(opt) > 2 and all(f"-{c}" in flags for c in opt[1:])
 
 
-def program_ex(words: list[str]) -> tuple[list[str], list[str]]:
-    """Words of the real command, and files the wrappers themselves write (`time -o FILE`).
+ASSIGN_RE = re.compile(r"^\w+(\[[^\]]*\])?\+?=", re.S)
+
+
+def program_ex(words: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """Words of the real command, files the wrappers write (`time -o FILE`), and the NAME=VALUE
+    words that set variables ahead of it (leading assignments and `env NAME=VALUE`).
 
     Skip shell keywords, env assignments and wrappers like sudo/timeout to see the real program."""
     words = list(words)
     outputs: list[str] = []
+    assigns: list[str] = []
     i = 0
     while i < len(words):
         w = words[i]
@@ -390,7 +395,10 @@ def program_ex(words: list[str]) -> tuple[list[str], list[str]]:
                 raise Blocked("`coproc` with a quoted brace or an odd name can't be checked")
             else:
                 i += 1
-        elif w in SHELL_KEYWORDS or re.match(r"^\w+=", w):
+        elif w in SHELL_KEYWORDS:
+            i += 1
+        elif ASSIGN_RE.match(w):
+            assigns.append(w)
             i += 1
         elif w == "function" and i + 1 < len(words):
             i += 2
@@ -432,7 +440,7 @@ def program_ex(words: list[str]) -> tuple[list[str], list[str]]:
             i += WRAPPER_POSITIONALS.get(base, 0)
         else:
             break
-    return words[i:], outputs
+    return words[i:], outputs, assigns
 
 
 def program(words: list[str]) -> list[str]:
@@ -796,17 +804,31 @@ def runs_inline_code(words: list[str]) -> bool:
     return not args or any(INLINE_FLAG.match(a) for a in args)
 
 
-HOOK_VAR = re.compile(r"^(BASH_ENV|ENV|PS0|PS4|PROMPT_COMMAND)(\[[^\]]*\])?(\+?=.*)?$", re.S)
-HOOK_ASSIGN = re.compile(r"^(BASH_ENV|ENV|PS0|PS4|PROMPT_COMMAND)(\[[^\]]*\])?\+?=", re.S)
-DECLARERS = {"export", "declare", "typeset", "readonly", "local", "read", "printf"}
+HOOK_NAMES = "BASH_ENV|PS0|PS4|PROMPT_COMMAND"
+HOOK_VAR = re.compile(rf"^({HOOK_NAMES})(\[[^\]]*\])?(\+?=.*)?$", re.S)
+DECLARERS = {"export", "declare", "typeset", "readonly", "local"}
 
 
-def check_startup_hook_vars(raw: list[str], words: list[str]) -> None:
-    """Variables the shell evaluates as code (BASH_ENV, ENV, PS0, PS4, PROMPT_COMMAND)."""
+def variables_set(assigns: list[str], words: list[str]) -> list[str]:
+    """Variables this command sets: leading and `env` assignments, what export/declare/typeset/local/readonly
+    assign, and the names `read` / `printf -v` fill. Words that merely look like assignments in
+    other arguments (`grep ENV= src`, `make ENV=ci`) are not included."""
+    out = list(assigns)
     first = os.path.basename(words[0]) if words else ""
-    named = [w for w in raw if HOOK_ASSIGN.match(w)]
+    args = words[1:]
     if first in DECLARERS:
-        named += [w for w in words[1:] if not w.startswith("-") and HOOK_VAR.match(w)]
+        out += [a.split("=", 1)[0] + ("=" + a.split("=", 1)[1] if "=" in a else "")
+                for a in args if not a.startswith("-") and ASSIGN_RE.match(a)]
+    elif first == "read":
+        out += [a for a in args if not a.startswith("-") and re.match(r"^\w+(\[[^\]]*\])?$", a)]
+    elif first == "printf" and "-v" in args and args.index("-v") + 1 < len(args):
+        out.append(args[args.index("-v") + 1])
+    return out
+
+
+def check_startup_hook_vars(assigned: list[str]) -> None:
+    """Variables the shell evaluates as code (BASH_ENV, PS0, PS4, PROMPT_COMMAND)."""
+    named = [w for w in assigned if HOOK_VAR.match(w)]
     if named:
         raise Blocked(f"`{named[0].split('=')[0]}` makes the shell run code later; can't be checked")
 
@@ -910,7 +932,7 @@ def check_find(args: list[str], root: str, role: str, depth: int, cur: str | Non
             continue
         end = next((k for k in range(j + 1, len(exprs)) if exprs[k] in {";", "+"}), len(exprs))
         for r in roots:
-            words, outputs = program_ex([w.replace("{}", r) for w in exprs[j + 1:end]])
+            words, outputs, _ = program_ex([w.replace("{}", r) for w in exprs[j + 1:end]])
             check_words(words, root, role, depth + 1, cur, None, outputs)
 
 
@@ -1128,7 +1150,7 @@ GIT_ENV_HOOKS = re.compile(r"^(GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VA
                            r"GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_EXTERNAL_DIFF|GIT_SSH|GIT_SSH_COMMAND|GIT_PAGER|"
                            r"GIT_ASKPASS|GIT_PROXY_COMMAND|GIT_EDITOR|GIT_SEQUENCE_EDITOR|GIT_EXEC_PATH|"
                            r"HOME|XDG_CONFIG_HOME|GIT_DIR|GIT_WORK_TREE|GIT_CONFIG|GIT_CONFIG_NOSYSTEM|GIT_COMMON_DIR|"
-                           r"GIT_INDEX_FILE|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES)=")
+                           r"GIT_INDEX_FILE|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES)(=|$)")
 
 
 _DIFF = """--stat --shortstat --numstat --name-only --name-status --summary --patch --no-patch --raw --cached --staged
@@ -1267,7 +1289,7 @@ def git_read_only_reason(args: list[str], qa: bool = False) -> str | None:
 
 SNAPSHOT_FLAGS = {"--updateSnapshot", "--update-snapshot", "--update-snapshots", "--snapshot-update", "-update",
                   "--update-snapshots=all", "--update-snapshots=changed", "--update-snapshots=missing"}
-SNAPSHOT_ENV = re.compile(r"^(UPDATE_SNAPSHOTS?|SNAPSHOT_UPDATE|INSTA_UPDATE|UPDATE_GOLDEN|GOLDEN_UPDATE)=", re.I)
+SNAPSHOT_ENV = re.compile(r"^(UPDATE_SNAPSHOTS?|SNAPSHOT_UPDATE|INSTA_UPDATE|UPDATE_GOLDEN|GOLDEN_UPDATE)(=|$)", re.I)
 
 
 def rewrites_files(words: list[str]) -> str | None:
@@ -1379,15 +1401,16 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
             if expands:  # an unquoted heredoc still runs $(...) and backticks; the rest is text
                 for inner in find_subs(body):
                     check_bash(inner, root, role, depth + 1, cur)
-        words, outputs = program_ex(seg.words)
+        words, outputs, assigns = program_ex(seg.words)
         in_pipe = seg.sep in {"|", "|&"} or seg.after in {"|", "|&", "&"}
         bg_reset = pending and seg.after == "&"  # a backgrounded list runs in a subshell
         if pending and not in_pipe and seg.sep in {";", "||"}:
             cur, dirs[:], pending = None, ["?"], False
-        check_startup_hook_vars(seg.words, words)
-        if (read_only or role == "qa-engineer") and any(GIT_ENV_HOOKS.match(w) for w in seg.words):
+        assigned = variables_set(assigns, words)
+        check_startup_hook_vars(assigned)
+        if (read_only or role == "qa-engineer") and any(GIT_ENV_HOOKS.match(w) for w in assigned):
             raise Blocked(f"{role} may not set git environment that runs programs or changes config")
-        if (read_only or role == "qa-engineer") and any(SNAPSHOT_ENV.match(w) for w in seg.words):
+        if (read_only or role == "qa-engineer") and any(SNAPSHOT_ENV.match(w) for w in assigned):
             raise Blocked(f"{role} may not rewrite test snapshots")
         first = os.path.basename(words[0]) if words else ""
         assignish = any(re.match(r"^\w+\+?=", w) for w in seg.words) or first in {
