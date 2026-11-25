@@ -411,6 +411,30 @@ class DiscoverProfileTests(Base):
         has = (ROOT / "conventions" / "README.md").is_file()
         self.assertEqual(f"Conventions: {ROOT / 'conventions' / 'README.md'}" in out, has)
 
+    def test_conventions_opt_out_and_extra(self):
+        if not (ROOT / "conventions" / "README.md").is_file():
+            self.skipTest("conventions pack not present")
+        d = self.repo()
+        (d / "docs").mkdir()
+        (d / "docs" / "api-guide.md").write_text("x")
+        outside = self.tmp / "outside.md"
+        outside.write_text("x")
+        cfg = d / ".claude" / "engineering-team.json"
+        cfg.parent.mkdir(exist_ok=True)
+        cfg.write_text(json.dumps({"conventions": {"disable": ["ui", "api", "bogus"],
+                                                   "extra": ["docs/api-guide.md", str(outside), "../outside.md",
+                                                             "missing.md"]}}))
+        line = [x for x in self.discover(d).splitlines() if x.startswith("- Conventions:")]
+        self.assertEqual(len(line), 1)
+        self.assertIn("(skip: api, ui)", line[0])
+        self.assertIn("; project: docs/api-guide.md", line[0])
+        self.assertNotIn("outside", line[0])
+        self.assertNotIn("missing", line[0])
+        cfg.write_text(json.dumps({"conventions": {"disable": ["all"]}}))
+        self.assertNotIn("- Conventions:", self.discover(d))
+        cfg.write_text(json.dumps({"conventions": "nonsense"}))
+        self.assertIn("- Conventions:", self.discover(d))
+
     def test_previous_run_skips_untrustworthy_entries(self):
         d = self.repo()
         good = d / ".etk" / "runs" / "20240101-120000-real"

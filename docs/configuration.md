@@ -20,9 +20,14 @@ always sees it.
 | `rules` | object[] | Path-scoped invariants: `{"paths": "src/domain/**", "rule": "…", "check": "<cmd>"}`. Reviewers apply each rule to changed files matching `paths` and run `check` if present. Prefer rules with a `check`: prose-only rules are the weakest kind. |
 | `agents` | object | Map an ETK role to a project agent, e.g. `{"code-reviewer": "my-reviewer"}`. The guard only recognises the plugin's own agents (`engineering-team:*`), so a mapped project agent is **not** guarded: its read-only, QA and tech-writer limits, and the push/deploy/secrets rules, become whatever that agent's own tools and your permission settings allow. |
 | `models` | object | Override an agent's model, e.g. `{"developer": "sonnet", "code-reviewer": "opus"}`. Defaults: scout→haiku, qa-engineer→sonnet, code-reviewer→opus, tech-writer→opus, developer/ux-reviewer→your session's model. |
+| `conventions` | object | `{"disable": ["ui", "api"], "extra": ["docs/our-guide.md"]}`. `disable` drops topics of the [conventions pack](conventions.md) (`["all"]` turns it off); `extra` adds repo-relative files inside the project for agents to read. |
 | `notes` | string | Anything else, in a line or two. |
 
 Example: [`templates/engineering-team.json`](../templates/engineering-team.json).
+
+This file is shared with everyone who clones the repo, so it can't grant push, merge or
+deploy. Release keys in it (for example `push`, `deploy`, `release`) are ignored. How you
+ship lives in your own [workflow profile](workflow.md), outside the repo.
 
 ## Where rules come from (priority order)
 

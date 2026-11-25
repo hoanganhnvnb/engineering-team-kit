@@ -264,11 +264,51 @@ def hard_checks(root: Path, names: set[str], pkg, ci: list[str]) -> list[str]:
     return lines
 
 
+CONVENTION_TOPICS = {"git", "naming", "style", "api", "database", "versioning", "testing-errors", "security",
+                     "docs-review", "ui"}
+
+
+def conventions_line(root: Path) -> str | None:
+    """One line pointing at the conventions index, minus what the project switched off.
+
+    `conventions.extra` may only name files inside the project, so a repo can add its own
+    guide but can't point agents at files elsewhere on the machine.
+    """
+    index = PLUGIN_ROOT / "conventions" / "README.md"
+    if not index.is_file():
+        return None
+    cfg = read_json(root / ".claude" / "engineering-team.json")
+    conv = cfg.get("conventions") if isinstance(cfg, dict) else None
+    conv = conv if isinstance(conv, dict) else {}
+    disable = {str(x) for x in conv.get("disable") or [] if isinstance(x, str)} \
+        if isinstance(conv.get("disable"), list) else set()
+    if "all" in disable:
+        return None
+    line = f"- Conventions: {index}"
+    off = sorted(disable & CONVENTION_TOPICS)
+    if off:
+        line += f" (skip: {', '.join(off)})"
+    extra = []
+    real_root = root.resolve()
+    for x in conv.get("extra") or [] if isinstance(conv.get("extra"), list) else []:
+        if not isinstance(x, str) or not x or Path(x).is_absolute():
+            continue
+        target = (root / x).resolve()
+        if target.is_relative_to(real_root) and target.is_file():
+            extra.append(clean(x))
+        if len(extra) == 5:
+            break
+    if extra:
+        line += f"; project: {', '.join(extra)}"
+    return line
+
+
 def main() -> int:
     root = find_root(Path.cwd())
     print(f"## Project snapshot\n\n- root: `{root}`")
-    if (PLUGIN_ROOT / "conventions" / "README.md").is_file():
-        print(f"- Conventions: {PLUGIN_ROOT / 'conventions' / 'README.md'}")
+    line = conventions_line(root)
+    if line:
+        print(line)
 
     # Git state -- the Lead must know about uncommitted work before touching anything.
     branch = run(GIT + ["branch", "--show-current"], root)
