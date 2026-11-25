@@ -612,8 +612,8 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
             errors.append(f"decision {did}: needs a question")
         if d["level"] == "L4" and d["status"] == "autonomous":
             errors.append(f"decision {did}: L4 can't be autonomous (only the user can settle it)")
-        if d["level"] == "L4" and d["status"] == "approved" and len(_text(d.get("answer_quote"))) < MIN_QUOTE:
-            errors.append(f"decision {did}: approved L4 needs the user's verbatim words in 'answer_quote'")
+        if d["level"] == "L4" and d["status"] != "pending" and len(_text(d.get("answer_quote"))) < MIN_QUOTE:
+            errors.append(f"decision {did}: a settled L4 needs the user's verbatim words in 'answer_quote'")
         if outcome == "COMPLETE" and d["level"] == "L4" and d["status"] == "pending":
             errors.append(f"COMPLETE but L4 decision {did} is still pending (only the user can settle it)")
 
@@ -803,7 +803,9 @@ def profile_unconfirmed(prof: dict) -> str | None:
     stored = prof.get("confirmed_hash")
     if not prof.get("confirmed_at") or not isinstance(stored, str):
         return "it was never confirmed (`profile confirm`)"
-    return "it changed after it was last confirmed; show it to the developer and run `profile confirm`"
+    if stored != etk_profile.settings_hash(prof):
+        return "it changed after it was last confirmed; show it to the developer and run `profile confirm`"
+    return None
 
 
 def cmd_authorize(a) -> int:
@@ -878,7 +880,11 @@ def cmd_act(a) -> int:
         if not target:
             refuse(f"act --action {a.action} needs --target, the deploy target's name in the profile")
         # The profile knows which targets are production; it can only add the flag, never drop it.
-        production = profile_production(a.data, a.target.strip()) or production
+        listed = profile_production(a.data, target)
+        if listed is None and not production and not PROD_WORDS.search(target):
+            refuse(f"`{target}` is not a deploy target in the workflow profile under {a.data}; add it "
+                   "(`profile set deploy.targets …`) or record it with --production")
+        production = bool(listed) or production or bool(PROD_WORDS.search(target))
 
     def change(led):
         actions = ledger_list(led, "actions")
@@ -911,6 +917,8 @@ def cmd_decide(a) -> int:
                 refuse(f"decision {a.id} is new: it needs --level and --question")
             d = {"id": a.id, "status": "pending"}
             decisions.append(d)
+        if d.get("level") == "L4" and a.level is not None and a.level != "L4":
+            refuse(f"decision {a.id} is L4; only the user can settle it, so its level can't be lowered")
         for key, val in (("level", a.level), ("question", a.question)):
             if val is not None:
                 d[key] = val

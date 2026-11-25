@@ -399,6 +399,15 @@ class ReleaseLedgerTests(unittest.TestCase):
                       "tests pass and no regressions then ship to production"):
             self.assertTrue(etk_run.affirms(quote, etk_run.PROD_WORDS), quote)
 
+    def test_l4_decision_stays_l4_and_superseded_needs_words(self):
+        run = self.ship_run()
+        self.etk("decide", "--id", "D1", "--level", "L4", "--question", "Drop the orders table?", str(run))
+        r = self.etk("decide", "--id", "D1", "--level", "L1", "--status", "autonomous", str(run))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("can't be lowered", r.stderr)
+        self.etk("decide", "--id", "D1", "--status", "superseded", str(run))
+        self.assertIn("a settled L4 needs the user's verbatim words", self.check(run).stdout)
+
     def test_hand_edited_profile_needs_a_new_confirm(self):
         run, _ = self.init("--kind", "ship")
         self.profile("set", "release.push", "confirm")
@@ -557,7 +566,7 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.assertIn("L4 can't be autonomous", self.check(run).stdout)
         for quote in ((), ("--answer-quote", " y ")):
             self.etk("decide", *q, "--status", "approved", *quote, str(run))
-            self.assertIn("approved L4 needs the user's verbatim words", self.check(run).stdout)
+            self.assertIn("a settled L4 needs the user's verbatim words", self.check(run).stdout)
         self.etk("decide", *q, "--status", "approved", "--answer-quote", "yes, drop it", str(run))
         r = self.check(run)
         self.assertEqual(r.returncode, 0, r.stdout)
