@@ -140,7 +140,8 @@ Each takes an optional trailing run path. New ledger fields: `phase`, `phase_his
 `commit|push|pr|merge|tag|deploy|rollback`. Sources: `prompt` / `answer` (the user's verbatim
 words in `quote`) or `profile` (the workflow profile; only for commit, push, pr).
 `authorize --source profile` needs `--data DIR` and checks the profile: `release.<action>`
-must be `auto` (a PR needs `release.integrate: pr` and `release.push: auto`), and `auto`
+must be `auto` (a PR needs `release.integrate: pr` and `release.push: auto`), and the
+profile must be confirmed with no change since (`confirmed_at >= updated_at`). `auto`
 values from a profile set up in another checkout or for another push URL don't count until
 the developer runs `profile confirm` here.
 

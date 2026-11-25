@@ -87,7 +87,8 @@ def clip(s, n: int = MAX_STR) -> str:
 
 
 def now() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    # Microseconds, so a `set` right after `confirm` is later than it (etk_run compares the two).
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds")
 
 
 def run(cmd: list[str], cwd, timeout: int = 10) -> str | None:

@@ -50,6 +50,7 @@ class ReleaseLedgerTests(unittest.TestCase):
     def auth_profile(self, run, action="push"):
         """Set release.<action>: auto in the workflow profile and authorize `action` from it."""
         self.profile("set", f"release.{action}", "auto")
+        self.profile("confirm")
         r = self.etk("authorize", "--action", action, "--source", "profile", "--data", str(self.data), str(run))
         self.assertEqual(r.returncode, 0, r.stderr)
         return r
@@ -184,6 +185,7 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.assertEqual(self.etk("authorize", "--action", "pr", "--source", "profile", *data, str(run)).returncode, 2)
         self.assertEqual((run / "gates.json").read_text(), before)
         self.profile("set", "release.integrate", "pr")
+        self.profile("confirm")
         for action in ("push", "pr"):
             r = self.etk("authorize", "--action", action, "--source", "profile", *data, str(run))
             self.assertEqual(r.returncode, 0, r.stderr)
@@ -196,6 +198,26 @@ class ReleaseLedgerTests(unittest.TestCase):
         led["authorizations"].append({"action": "commit", "source": "profile", "quote": "", "target": ""})
         self.write(run, led)
         self.assertIn("source profile without the profile's hash", self.check(run).stdout)
+
+    def test_profile_authorizes_only_after_confirm(self):
+        run, _ = self.init("--kind", "ship")
+        before = (run / "gates.json").read_text()
+        data = ("--data", str(self.data))
+        self.profile("set", "release.push", "auto")
+        r = self.etk("authorize", "--action", "push", "--source", "profile", *data, str(run))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("never confirmed", r.stderr)
+        self.profile("confirm")
+        self.profile("set", "release.commit", "auto")  # a change after confirm needs a new confirm
+        for action in ("push", "commit"):
+            r = self.etk("authorize", "--action", action, "--source", "profile", *data, str(run))
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("changed after it was last confirmed", r.stderr)
+        self.assertEqual((run / "gates.json").read_text(), before)
+        self.profile("confirm")
+        for action in ("push", "commit"):
+            r = self.etk("authorize", "--action", action, "--source", "profile", *data, str(run))
+            self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_profile_from_another_checkout_or_push_url_does_not_authorize(self):
         git(self.dir, "remote", "add", "origin", "https://github.com/victim/prod.git")

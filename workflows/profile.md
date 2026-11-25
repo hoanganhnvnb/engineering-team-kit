@@ -47,7 +47,9 @@ Otherwise the brief profile in the snapshot is all you need.
 ## Changing it later
 
 When the user changes a habit, update only that field with `set` and tell them in
-one line what changed. A durable note about how they work ("QA resets nightly",
+one line what changed. Any change to the profile undoes its confirmation: its `auto`
+settings count again only after the user sees `profile show --brief` and you run
+`profile confirm`. A durable note about how they work ("QA resets nightly",
 "never deploy on Fridays") goes in with `profile remember "<fact>" --data …`, after the
 user agrees it should be kept. The file location is `profile path --data …`. To reset,
 delete that file.
