@@ -636,14 +636,21 @@ def next_dir(words: list[str], cur: str | None, dirs: list) -> str | None:
     return None if joined is None else os.path.normpath(joined)
 
 
-STDIN_PATHS = {"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}
+def reads_stdin(operand: str) -> bool:
+    """`-`, or anything under /dev or /proc (/dev/stdin, /dev/fd/0, /proc/self/fd/0 and their spellings)."""
+    if operand == "-":
+        return True
+    path = os.path.normpath(re.sub(r"/{2,}", "/", operand))
+    return path.startswith(("/dev/", "/proc/"))
+
+
 SHELL_OPT_WITH_ARG = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
 
 
 def shell_input(prog: str, args: list[str]) -> tuple[str, str | None]:
     """Where a shell gets its commands: ("script", text) for -c, ("stdin", None), or ("file", None)."""
     if prog in {"source", "."}:
-        return ("stdin", None) if args[:1] and args[0] in STDIN_PATHS else ("file", None)
+        return ("stdin", None) if args[:1] and reads_stdin(args[0]) else ("file", None)
     i, c_flag, s_flag = 0, False, False
     while i < len(args):
         w = args[i]
@@ -658,11 +665,10 @@ def shell_input(prog: str, args: list[str]) -> tuple[str, str | None]:
             if w[0] == "-":
                 c_flag = c_flag or "c" in w[1:]
                 s_flag = s_flag or "s" in w[1:]
-            if w[-1] in "oO":
-                if i + 1 >= len(args):
-                    raise Blocked(f"`{prog} {w}` is missing its value; can't tell what it runs")
-                i += 1
-            i += 1
+            wants = sum(c in "oO" for c in w[1:])  # each o/O in the cluster takes the next argument
+            if i + wants >= len(args) and wants:
+                raise Blocked(f"`{prog} {w}` is missing its value; can't tell what it runs")
+            i += 1 + wants
         else:
             break
     operands = args[i:]
@@ -670,7 +676,7 @@ def shell_input(prog: str, args: list[str]) -> tuple[str, str | None]:
         if not operands:
             raise Blocked(f"`{prog} -c` without a script can't be checked")
         return "script", operands[0]
-    if s_flag or not operands or operands[0] in STDIN_PATHS:
+    if s_flag or not operands or reads_stdin(operands[0]):
         return "stdin", None
     return "file", None
 

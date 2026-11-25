@@ -336,8 +336,36 @@ CD_FAIL_CLOSED = (
     ]]
 )
 
+# Clustered shell options that take values, and spellings of stdin.
+SHELL_CLUSTERS = (
+    [("dev", c, "block") for c in [
+        "bash -oc pipefail 'git push'",
+        "bash -co pipefail 'git push'",
+        "bash -eoc pipefail 'git push'",
+        "bash -Oc extglob 'git push'",
+        "bash -oo errexit pipefail -c 'git push'",
+        "bash -oo a",
+        "echo 'git push' | bash -eo pipefail",
+        "echo 'git push' | bash //dev/stdin",
+        "echo 'git push' | bash /dev/./stdin",
+        "echo 'git push' | bash /dev//fd/0",
+        "echo 'git push' | bash /dev/fd/00",
+        "echo 'git push' | bash /proc/self/fd/0",
+        "echo 'git push' | bash /proc/12345/fd/0",
+        "echo 'git push' | bash /proc//self/fd/0",
+        "echo 'git push' | bash /dev/fd/3",
+        "source //dev/stdin",
+        ". /dev/./stdin",
+    ]]
+    + [("dev", c, "allow") for c in [
+        "bash -oc pipefail 'npm test'",
+        "bash -eo pipefail scripts/run.sh",
+        "bash -Oc extglob 'npm test'",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS)
 
 
 def make_project(base: Path) -> Path:
