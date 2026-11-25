@@ -102,4 +102,7 @@ changed, how to reach and prove it, the decisions the user made), the template f
   only when the project config's `models` overrides it, or for a deliberate second opinion
   on a different model (tie-breaks).
 - Lens: for reviewers, say which lens (`correctness`, `security`, `architecture`).
+- ID prefix: for reviewers, say which finding-ID prefix to use: `R` for `correctness` and
+  `architecture`, `S` for `security`. Reviewers running in parallel must not share a prefix,
+  or the ledger rejects the duplicate IDs.
 - Never let two developers own the same file at the same time.

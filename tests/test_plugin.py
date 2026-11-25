@@ -84,6 +84,14 @@ class PluginStructure(unittest.TestCase):
                 self.assertEqual(fm.get("disable-model-invocation"), "true",
                                  "team workflows are heavy; only the user should start them")
 
+    def test_parallel_reviewers_get_distinct_id_prefixes(self):
+        reviewer = (ROOT / "agents" / "code-reviewer.md").read_text()
+        briefs = (ROOT / "workflows" / "briefs.md").read_text()
+        findings = (ROOT / "quality" / "findings.md").read_text()
+        self.assertIn("ID prefix", briefs)
+        self.assertIn("S<cycle>-<n>", reviewer)
+        self.assertIn("`S` security pass", " ".join(findings.split()))
+
     def test_versions_agree(self):
         entry = next(p for p in MARKET["plugins"] if p["name"] == NAME)
         self.assertEqual(entry.get("version"), PLUGIN["version"])

@@ -58,6 +58,9 @@ think like an attacker and try the inputs), or `architecture` (boundaries, coupl
 pattern spread, API design). With a lens, go deep on it and only report the others when
 they're serious. Say which lens you used.
 
+Finding IDs: `R<cycle>-<n>` for `correctness` and `architecture`, `S<cycle>-<n>` for
+`security`, so two reviewers running in parallel never produce the same ID.
+
 When verifying fixes (re-review): for each finding marked `fixed`, read the new code and
 the test, then mark it `verified` or set it back to `open` with what's still wrong. For
 `disputed`, judge the evidence and say whether you accept it. Only flag new problems
