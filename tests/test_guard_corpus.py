@@ -787,8 +787,56 @@ READ_ONLY_MUTATIONS = (
     ]]
 )
 
+# R1-8: the QA "create only" rule must not leak through editors, git, inline code or snapshots.
+QA_LEAKS = (
+    [("qa", c, "block") for c in [
+        "perl -pi -e 's/a/b/' tests/existing.test.js",
+        "npx prettier --write tests",
+        "black .",
+        "ruff format .",
+        "gofmt -w x.go",
+        "cargo fmt",
+        "git checkout main -- src/a.js",
+        "git checkout main",
+        "git apply p.patch",
+        "git stash",
+        "git reset",
+        "git merge main",
+        "git restore src/a.js",
+        "git worktree prune",
+        "python3 -c \"open('tests/existing.test.js','w').write('x')\"",
+        "node -e \"require('fs').writeFileSync('a','x')\"",
+        "jest -u",
+        "npx jest --updateSnapshot",
+        "npm test -- -u",
+        "npx vitest -u",
+        "pytest --snapshot-update",
+        "npx playwright test --update-snapshots",
+        "go test -update ./...",
+        "UPDATE_SNAPSHOTS=1 npm test",
+    ]]
+    + [("rev", c, "block") for c in ["npx jest -u", "UPDATE_SNAPSHOTS=1 npm test", "pytest --snapshot-update"]]
+    + [("qa", c, "allow") for c in [
+        "npx jest",
+        "npm test",
+        "pytest -q",
+        "git add tests/new.test.js",
+        "git commit -m 'add tests'",
+        "git status",
+        "git diff",
+        "git log -3",
+        "black --check .",
+        "npx prettier --check tests",
+        "python3 -c \"print(1)\"",
+        "git worktree add ../base HEAD",
+        "git worktree remove ../base",
+        "cargo fmt --check",
+        "npm test -- --coverage",
+    ]]
+)
+
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
-         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS)
+         + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS)
 
 
 def make_project(base: Path) -> Path:

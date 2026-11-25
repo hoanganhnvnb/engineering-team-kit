@@ -1002,22 +1002,17 @@ def check_words(words: list[str], root: str, role: str, depth: int, cur: str | N
         if (prog in SHELL_WRITERS and any(writes_existing(t, root, cur) for t in write_operands(prog, words[1:]))) \
                 or (prog == "sed" and any(w.startswith("-i") for w in words[1:])):
             raise Blocked("qa-engineer may only create new files, not change existing ones")
+        qa_reason = rewrites_files(words) or (
+            git_read_only_reason(words[1:], qa=True) if prog == "git" else None)
+        if qa_reason:
+            raise Blocked(f"qa-engineer may only create new files ({qa_reason})")
     if read_only:
         words = real_tool(words)
         prog = os.path.basename(words[0])
         ops = write_operands(prog, words[1:])
         writes = prog in SHELL_WRITERS and not (ops and all(scratch(t, root, cur) for t in ops))
-        rest = [w for w in words[1:] if not w.startswith("-") and w not in {"exec", "dlx", "run"}]
-        tool = os.path.basename(rest[0]) if prog in {"npx", "pnpx", "bunx", "pnpm", "yarn", "uvx", "pipx"} and rest else prog
-        inplace = (prog == "sed" and any(w.startswith("-i") or w.startswith("--in-place") for w in words[1:])) \
-            or (re.match(r"^(perl|ruby)[\d.]*$", prog) and any(PERL_INPLACE.match(w) for w in words[1:])) \
-            or any(w in {"--write", "--fix", "--apply", "--apply-unsafe"} or w.startswith(("--write=", "--fix="))
-                   for w in words[1:]) \
-            or (any(tool == name and (flag is None or flag in words[1:]) for name, flag in FORMATTER_WRITE)
-                and not any(w in {"--check", "-check", "--diff", "--check-only", "-l", "--list-different"}
-                            for w in words[1:]))
-        extra = read_only_extra_reason(words, root, cur)
-        if writes or inplace or extra:
+        extra = rewrites_files(words) or read_only_extra_reason(words, root, cur)
+        if writes or extra:
             raise Blocked(f"{role} is read-only; it reports findings and the developer changes files"
                           + (f" ({extra})" if extra else ""))
 
@@ -1044,7 +1039,10 @@ for _alias, _base in {"pnpm": "npm", "yarn": "npm", "bun": "npm", "pip3": "pip",
     INSTALL_SUBS[_alias] = INSTALL_SUBS[_base]
 
 
-def git_read_only_reason(args: list[str]) -> str | None:
+QA_GIT = {"add", "commit"}
+
+
+def git_read_only_reason(args: list[str], qa: bool = False) -> str | None:
     """Why this git command isn't read-only, or None. Subcommands outside an allowlist are refused."""
     i, globs = 0, []
     while i < len(args) and args[i].startswith("-"):
@@ -1057,7 +1055,9 @@ def git_read_only_reason(args: list[str]) -> str | None:
     sub, rest = args[i], args[i + 1:]
     if any(a == "--output" or a.startswith("--output=") for a in rest):
         return f"`git {sub} --output` writes a file"
-    if sub in GIT_READ:
+    if sub in GIT_READ or (qa and sub in QA_GIT):
+        return None
+    if qa and sub == "worktree" and rest[:1] in (["add"], ["remove"], ["list"]):
         return None
     if sub == "branch" and all(a in LIST_FLAGS or not a.startswith("-") for a in rest) \
             and (not [a for a in rest if not a.startswith("-")] or set(rest) & {"-l", "--list", "--contains", "--merged",
@@ -1079,6 +1079,31 @@ def git_read_only_reason(args: list[str]) -> str | None:
             and not set(rest) & {"--add", "--unset", "--unset-all", "--replace-all", "--edit", "-e"}:
         return None
     return f"`git {sub}` can change the repository or working tree"
+
+
+SNAPSHOT_FLAGS = {"--updateSnapshot", "--update-snapshot", "--update-snapshots", "--snapshot-update", "-update",
+                  "--update-snapshots=all", "--update-snapshots=changed", "--update-snapshots=missing"}
+SNAPSHOT_ENV = re.compile(r"^(UPDATE_SNAPSHOTS?|SNAPSHOT_UPDATE|INSTA_UPDATE|UPDATE_GOLDEN|GOLDEN_UPDATE)=", re.I)
+
+
+def rewrites_files(words: list[str]) -> str | None:
+    """In-place editors, formatters that write, and test runs that rewrite snapshots."""
+    words = real_tool(words)
+    prog = os.path.basename(words[0])
+    args = words[1:]
+    rest = [w for w in args if not w.startswith("-") and w not in {"exec", "dlx", "run"}]
+    tool = os.path.basename(rest[0]) if prog in {"npx", "pnpx", "bunx", "pnpm", "yarn", "uvx", "pipx"} and rest else prog
+    if (prog == "sed" and any(w.startswith("-i") or w.startswith("--in-place") for w in args)) \
+            or (re.match(r"^(perl|ruby)[\d.]*$", prog) and any(PERL_INPLACE.match(w) for w in args)) \
+            or any(w in {"--write", "--fix", "--apply", "--apply-unsafe"} or w.startswith(("--write=", "--fix="))
+                   for w in args) \
+            or (any(tool == name and (flag is None or flag in args) for name, flag in FORMATTER_WRITE)
+                and not any(w in {"--check", "-check", "--diff", "--check-only", "-l", "--list-different"} for w in args)):
+        return "it edits files in place"
+    if any(w in SNAPSHOT_FLAGS or w.startswith("--update-snapshots=") for w in args) \
+            or ("-u" in args and (tool in {"jest", "vitest", "ava", "tap"} or prog in {"npm", "pnpm", "yarn", "bun", "npx"})):
+        return "it rewrites test snapshots"
+    return None
 
 
 def read_only_extra_reason(words: list[str], root: str, cur: str | None) -> str | None:
@@ -1148,8 +1173,8 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         check_bash(inner, root, role, depth + 1, cur)
     events = parse(cmd)
     read_only = role in READ_ONLY_ROLES or role in DOCS_ONLY_ROLES
-    if read_only and WRITE_CODE.search(cmd) and any(runs_inline_code(program(e.words)) for e in events if isinstance(e, Seg)):
-        raise Blocked(f"{role} is read-only; inline code that writes files isn't allowed")
+    if (read_only or role == "qa-engineer") and WRITE_CODE.search(cmd) and any(runs_inline_code(program(e.words)) for e in events if isinstance(e, Seg)):
+        raise Blocked(f"{role} may not change existing files; inline code that writes files isn't allowed")
     created = {os.path.normpath(t) for e in events if isinstance(e, Seg) for t in files_created(e)}
     dirs: list = []
     groups: list = []
@@ -1176,6 +1201,8 @@ def check_bash(cmd: str, root: str, role: str, depth: int = 0, cur: str | None =
         if pending and not in_pipe and seg.sep in {";", "||"}:
             cur, dirs[:], pending = None, ["?"], False
         check_startup_hook_vars(seg.words, words)
+        if (read_only or role == "qa-engineer") and any(SNAPSHOT_ENV.match(w) for w in seg.words):
+            raise Blocked(f"{role} may not rewrite test snapshots")
         first = os.path.basename(words[0]) if words else ""
         assignish = any(re.match(r"^\w+\+?=", w) for w in seg.words) or first in {
             "export", "declare", "typeset", "local", "readonly"}
