@@ -41,6 +41,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1778,11 +1779,26 @@ def decide(data: dict) -> str | None:
     return None
 
 
+# hooks.json gives the hook 10 s. Claude Code lets the tool call proceed when a hook times out, so the
+# guard stops itself a little earlier and blocks: a slow check never counts as an allow.
+BUDGET_SECONDS = 8
+
+
+def _out_of_time(signum, frame):
+    print("[engineering-team guard] blocked: the check ran out of time and couldn't be completed. "
+          "Report it to the Lead.", file=sys.stderr)
+    sys.stderr.flush()
+    os._exit(2)
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
     except ValueError:
         return 0
+    if hasattr(signal, "SIGALRM"):
+        signal.signal(signal.SIGALRM, _out_of_time)
+        signal.alarm(BUDGET_SECONDS)
     reason = decide(data)
     if reason is not None:
         print(f"[engineering-team guard] blocked: {reason}. If this is really needed, stop and report it "

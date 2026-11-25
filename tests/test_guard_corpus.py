@@ -13,7 +13,9 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -1459,6 +1461,16 @@ class GuardCorpus(unittest.TestCase):
                     data["tool_input"]["command"] = cmd
                     with self.subTest(cmd=cmd):
                         self.assertIsNone(guard.decide(data))
+
+    def test_a_check_that_runs_out_of_time_blocks(self):
+        code = ("import io, sys, time; sys.path.insert(0, %r); import guard; guard.BUDGET_SECONDS = 1; "
+                "guard.decide = lambda d: time.sleep(30); sys.stdin = io.StringIO('{}'); sys.exit(guard.main())"
+                % str(ROOT / "hooks"))
+        started = time.time()
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=20)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("ran out of time", r.stderr)
+        self.assertLess(time.time() - started, 15)
 
     def test_unexpected_errors_block_etk_agents(self):
         agent = ROLES["dev"]
