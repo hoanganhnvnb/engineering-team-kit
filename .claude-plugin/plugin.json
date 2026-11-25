@@ -11,5 +11,21 @@
   "homepage": "https://github.com/hoanganhnvnb/engineering-team-kit",
   "repository": "https://github.com/hoanganhnvnb/engineering-team-kit",
   "license": "MIT",
-  "keywords": ["engineering", "code-review", "qa", "ux", "workflow", "agents", "quality-gates", "solo", "small-team"]
+  "keywords": [
+    "claude-code",
+    "multi-agent",
+    "ai-agents",
+    "code-review",
+    "qa",
+    "ux",
+    "quality-gates",
+    "workflow",
+    "conventional-commits",
+    "devops",
+    "deploy",
+    "agents",
+    "engineering",
+    "solo",
+    "small-team"
+  ]
 }
