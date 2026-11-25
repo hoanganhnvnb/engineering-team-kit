@@ -1266,6 +1266,26 @@ GIT_CONFIG_MORE = (
     + [("dev", c, "allow") for c in ["git config user.email dev@example.com", "cat ~/.gitconfig",
                                      "git config --get branch.main.remote"]]
 )
+# Third review: user-level files that decide what runs (settings, installed plugins, the Python
+# folders the launchers search) are the user's, not a subagent's.
+TOOL_HOME = (
+    [(r, c, "block") for r in ("dev", "qa") for c in [
+        "echo '{}' > ~/.claude/settings.json",
+        "echo '{}' > $HOME/.claude/settings.local.json",
+        "cp x ~/.claude/plugins/cache/m/p/1.0/hooks/guard.py",
+        "touch ~/.claude/plugins/cache/m/p/1.0/hooks/run-guard.sh",
+        "ln -s /bin/true ~/.pyenv/versions/0/bin/python3",
+        "cp x ~/.local/share/uv/python/cpython-3.12/bin/python3",
+        "ln -sf /bin/true ~/.local/bin/python3.12",
+        "tee ~/.claude/hooks/x.sh",
+    ]]
+    + [(r, c, "allow") for r in ("dev", "rev", "qa") for c in [
+        "cat ~/.claude/settings.json",
+        "ls ~/.pyenv/versions",
+        "cat ~/.claude/plugins/cache/m/p/1.0/hooks/guard.py",
+    ]]
+    + [("dev", c, "allow") for c in ["echo x > ~/notes.md", "touch ~/.local/bin/mytool"]]
+)
 ETK_INIT = (
     [(r, c, "block") for r in ("dev", "qa", "rev") for c in [
         'sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run init "Ship it" --kind ship',
@@ -1279,7 +1299,7 @@ ETK_INIT = (
 
 CASES = (BENIGN + BASELINE_BLOCKS + R1_1_CD + R1_2_COMPOUND + PROCESS_SUBST + CD_UNKNOWN + SHELL_ARGV
          + WRAPPER_OPTS + CD_FAIL_CLOSED + SHELL_CLUSTERS + WRAPPER_EDGES + CD_LATER_AND_BUILTINS + WRAPPER_EDGES_2 + TRAP_STRICT + STARTUP_VARS + NESTED_TIME_OUTPUT + BACKGROUND_CD + CREATED_OPERAND + GIT_CHECKOUT + GIT_DIR_AND_CLEAN + DEPLOY_FORMS + SECRET_WRITES + READ_ONLY_MUTATIONS + QA_LEAKS + FIND_WRITES + GIT_RUNS_PROGRAMS + PROTECTED + QUOTING + WRAPPER_CHDIR + ETK_EXEC + GIT_OPTIONS + GIT_ENV + ENV_LOOKALIKES + ETK_EXEC_FORMS + GIT_OTHER_OPTIONS + READ_ONLY_READS + NESTED_ENV
-         + CD_HOME + GIT_REMOTE_CONFIG + GIT_CONFIG_MORE + ETK_INIT)
+         + CD_HOME + GIT_REMOTE_CONFIG + GIT_CONFIG_MORE + TOOL_HOME + ETK_INIT)
 
 
 def make_project(base: Path) -> Path:
@@ -1381,6 +1401,16 @@ class GuardCorpus(unittest.TestCase):
         data = {"tool_name": "Write", "tool_input": {"file_path": "src/new.js"}, "cwd": str(self.project),
                 "agent_type": ROLES["dev"]}
         self.assertIsNone(guard.decide(data))
+
+    def test_write_tools_cannot_touch_user_level_tool_files(self):
+        home = os.path.expanduser("~")
+        for role in ("dev", "qa"):
+            for path in (f"{home}/.claude/settings.json", f"{home}/.claude/plugins/cache/m/p/hooks/guard.py",
+                         f"{home}/.pyenv/versions/0/bin/python3", f"{home}/.local/bin/python3.12"):
+                data = {"tool_name": "Write", "tool_input": {"file_path": path}, "cwd": str(self.project),
+                        "agent_type": ROLES[role]}
+                with self.subTest(role=role, path=path):
+                    self.assertIsNotNone(guard.decide(data))
 
     def test_unexpected_errors_block_etk_agents(self):
         agent = ROLES["dev"]

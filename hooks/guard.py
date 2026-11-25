@@ -1090,6 +1090,31 @@ def in_plugin_data(path: str, cur: str | None) -> bool:
     return inside(absjoin(p, cur), data)
 
 
+TOOL_HOME_DIRS = (".claude/plugins", ".claude/hooks", ".pyenv/versions", ".local/share/uv/python",
+                  ".asdf/installs/python", ".local/share/mise/installs/python")
+
+
+def in_tool_home(path: str, cur: str | None) -> bool:
+    """User-level files that decide what runs for the Lead and for this hook: Claude Code's own
+    settings, installed plugins (including this hook's code), and the folders `find-python.sh`
+    picks an interpreter from. A subagent never needs to write there."""
+    home = os.environ.get("HOME", "")
+    if not os.path.isabs(home):
+        return False
+    full = absjoin(expand_home(path.strip().strip("'\""), home), cur)
+    if full is None:
+        return False
+    real, h = os.path.realpath(full), os.path.realpath(home)
+    bases = [os.path.join(h, d) for d in TOOL_HOME_DIRS]
+    bases += [os.environ[v] for v in ("PYENV_ROOT", "UV_PYTHON_INSTALL_DIR") if os.path.isabs(os.environ.get(v, ""))]
+    if any(real == b or real.startswith(b + os.sep) for b in bases):
+        return True
+    name = os.path.basename(real)
+    if os.path.dirname(real) == os.path.join(h, ".claude") and re.match(r"settings.*\.json$", name):
+        return True
+    return os.path.dirname(real) == os.path.join(h, ".local", "bin") and name.startswith("python")
+
+
 def in_run_records(path: str, cur: str | None) -> bool:
     """A path inside `.etk/` (run ledgers: gates, permissions, release actions). Only the Lead writes them."""
     p = path.strip().strip("'\"")
@@ -1132,6 +1157,9 @@ def check_protected(path: str, root: str, cur: str | None) -> None:
     if in_plugin_data(path, cur):
         raise Blocked(f"`{path}` is in the plugin data dir (the developer's workflow profile); only the Lead "
                       f"records workflow profile / release decisions")
+    if in_tool_home(path, cur):
+        raise Blocked(f"`{path}` is Claude Code's settings, an installed plugin or a Python install; "
+                      "only the user changes those")
     if is_protected(path, root, cur):
         raise Blocked(f"`{path}` is listed in protected_paths (.claude/engineering-team.json); ask the user first")
 

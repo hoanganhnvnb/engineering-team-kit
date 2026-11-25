@@ -82,6 +82,10 @@ Honest list. If one of these bites you, an issue is welcome.
   path at runtime, gets past that, like any other guard gap. `run check` still requires
   every release action to match a permission that quotes your words, and the Lead,
   not a subagent, runs every outward step.
+- **User-level tool files are off limits to subagents.** They can't write `~/.claude/settings*.json`,
+  `~/.claude/plugins/` (including this hook's installed code), `~/.claude/hooks/`, `~/.local/bin/python*`
+  or the pyenv, uv, asdf and mise Python folders, because those decide what runs for you and for
+  the guard. Same limit as above: judged by the path the command names.
 - **`etk exec` keeps the command's hands off the ledger, not off the file.** The command
   `exec` runs is repository code (a test suite). `exec` snapshots the ledger first and
   afterwards restores everything but appended gate command records, so a test can't add
