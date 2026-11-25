@@ -52,7 +52,8 @@ how to trigger it) and stop.
 8. **Make it stick.** Ask whether a lint rule, type, or test at a higher layer would have
    caught this class of bug, and put the proposal in the report (see
    `${CLAUDE_PLUGIN_ROOT}/quality/hardening.md`). Don't add it unasked.
-9. **Gates + report:** fill G1–G6 (`${CLAUDE_PLUGIN_ROOT}/quality/gates.md`), run
+9. **Gates + report:** fill G1–G6 (`${CLAUDE_PLUGIN_ROOT}/quality/gates.md`; record test
+   commands with `etk.sh exec G3 --type test -- <cmd>` where you can), run
    `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run check`, report with
    `${CLAUDE_PLUGIN_ROOT}/quality/report-template.md`. Include the root cause in one or
    two sentences and the reproduction test name.

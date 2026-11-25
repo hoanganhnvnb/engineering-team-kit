@@ -6,6 +6,7 @@
     etk_run.py render [RUN_DIR|gates.json]    # markdown summary for the final report
     etk_run.py stats [--json] [--last N]      # aggregate all runs: categories, ratchet candidates, trust
     etk_run.py latest                         # print the newest run dir
+    etk_run.py exec G3 --type test -- <cmd>   # run <cmd>, record its real exit code in the ledger
 
 The ledger (`.etk/runs/<id>/gates.json`) is the single source of truth for
 gate status and findings. `check` is deliberately strict: it is the thing that
@@ -20,6 +21,7 @@ from collections import Counter
 import datetime as dt
 import json
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -242,6 +244,9 @@ def _validate(ledger: dict) -> tuple[list[str], list[str]]:
             if not cmds:
                 errors.append(f"{g}: PASS without any recorded command — tests that did not run cannot pass")
             for c in cmds:
+                if isinstance(c, dict) and c.get("cmd") and c.get("recorded_by") != "exec":
+                    warnings.append(f"{g}: `{c.get('cmd')}` was not recorded by `etk_run.py exec`; "
+                                    "its exit code is self-reported")
                 if not isinstance(c, dict) or not c.get("cmd"):
                     errors.append(f"{g}: each command needs a 'cmd'")
                 elif type(c.get("exit_code")) is not int:
@@ -323,6 +328,40 @@ def load(p: Path) -> dict:
         sys.exit(f"not found: {p}")
     except ValueError as e:
         sys.exit(f"{p}: invalid JSON: {e}")
+
+
+def cmd_exec(a) -> int:
+    """Run a command and write what really happened into the gate: exit code, last output line."""
+    if a.gate not in GATES:
+        print(f"unknown gate {a.gate!r}; expected one of {', '.join(GATES)}", file=sys.stderr)
+        return 2
+    cmd = a.cmd
+    if not cmd:
+        print("usage: etk_run.py exec <gate> --type <type> -- <command...>", file=sys.stderr)
+        return 2
+    p = resolve(a.run)
+    led = load(p)
+    gate = led.get("gates", {}).get(a.gate) if isinstance(led.get("gates"), dict) else None
+    if not isinstance(gate, dict) or not isinstance(gate.get("commands", []), list):
+        print(f"{p}: gate {a.gate} is malformed; fix the ledger first", file=sys.stderr)
+        return 2
+    last = ""
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            if line.strip():
+                last = line.strip()
+        rc = proc.wait()
+    except OSError as exc:
+        last, rc = f"could not start: {exc}", 127
+        print(last, file=sys.stderr)
+    gate.setdefault("commands", []).append({
+        "cmd": shlex.join(cmd), "type": a.type, "exit_code": rc, "last_line": last[:300], "recorded_by": "exec",
+    })
+    p.write_text(json.dumps(led, indent=2) + "\n")
+    print(f"[etk] {a.gate}: recorded `{shlex.join(cmd)}` exit {rc} in {p}", file=sys.stderr)
+    return rc
 
 
 def cmd_check(a) -> int:
@@ -497,13 +536,24 @@ def main() -> int:
         s = sub.add_parser(name)
         s.add_argument("path", nargs="?")
         s.set_defaults(fn=fn)
+    ex = sub.add_parser("exec", help="run a command and record its real exit code in a gate")
+    ex.add_argument("gate")
+    ex.add_argument("--type", choices=sorted(COMMAND_TYPES), default="test")
+    ex.add_argument("--run", default=None, metavar="RUN_DIR", help="default: the newest run")
+    ex.set_defaults(fn=cmd_exec)
     st = sub.add_parser("stats")
     st.add_argument("--json", action="store_true")
     st.add_argument("--last", type=int, default=None, metavar="N")
     st.set_defaults(fn=cmd_stats)
     l = sub.add_parser("latest")
     l.set_defaults(fn=lambda a: print(latest_run() or "") or 0)
-    a = ap.parse_args()
+    argv = sys.argv[1:]
+    cmd: list[str] = []
+    if argv[:1] == ["exec"] and "--" in argv:  # everything after `--` is the command, untouched by argparse
+        i = argv.index("--")
+        argv, cmd = argv[:i], argv[i + 1:]
+    a = ap.parse_args(argv)
+    a.cmd = cmd
     return a.fn(a)
 
 

@@ -115,6 +115,14 @@ class PluginStructure(unittest.TestCase):
         self.assertNotIn("couldn't execute", progress)
         self.assertIn(f"the {words[len(SKILLS)]} commands", (ROOT / "docs" / "install.md").read_text())
 
+    def test_exec_is_not_pre_approved_by_any_skill(self):
+        """`etk.sh exec` runs arbitrary commands; a pre-approval would skip the permission prompt."""
+        for name in SKILLS:
+            allowed = frontmatter(ROOT / "skills" / name / "SKILL.md").get("allowed-tools", "")
+            with self.subTest(skill=name):
+                self.assertNotIn("exec", allowed)
+                self.assertNotIn("etk_run.py", allowed)
+
     def test_versions_agree(self):
         entry = next(p for p in MARKET["plugins"] if p["name"] == NAME)
         self.assertEqual(entry.get("version"), PLUGIN["version"])

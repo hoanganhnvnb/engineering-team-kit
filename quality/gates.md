@@ -16,6 +16,12 @@ or a reason. The ledger (`.etk/runs/<id>/gates.json`) holds them, and
 
 - Tests that did not run do not pass. A G3/G4 `PASS` lists every command with its
   real exit code. The checker rejects a `PASS` without commands or with a non-zero exit.
+- Record commands with `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" exec G3 --type test -- <cmd>`.
+  It runs the command, prints its output, and writes the real exit code and last output line
+  into the gate, so the number in the ledger is not typed by hand. `check` warns about G3/G4
+  `PASS` commands that were not recorded this way (a warning, so older ledgers still
+  validate). `exec` is deliberately not in any skill's `allowed-tools`: it runs arbitrary
+  commands, so pre-approving it would skip the permission prompt. Expect to be asked.
 - "It compiles" is not G3. "The developer said it works" is not evidence: re-run it
   or have QA run it.
 - Pre-existing failures are recorded as such (test name + proof it fails on the base

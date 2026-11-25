@@ -269,6 +269,56 @@ class LedgerTests(unittest.TestCase):
             self.assertNotIn("Traceback", r.stderr)
             self.assertIn("Ledger check: FAILED", r.stdout)
 
+    def exec_cmd(self, run, *args):
+        return sh([sys.executable, str(ETK), "exec", *args], self.dir)
+
+    def test_exec_records_the_real_exit_code_and_last_line(self):
+        run, _ = self.init()
+        r = self.exec_cmd(run, "G3", "--type", "test", "--run", str(run), "--", sys.executable, "-c",
+                          "print('a'); print('3 passed'); raise SystemExit(4)")
+        self.assertEqual(r.returncode, 4, r.stderr)
+        self.assertIn("3 passed", r.stdout)
+        cmds = json.loads((run / "gates.json").read_text())["gates"]["G3"]["commands"]
+        self.assertEqual(len(cmds), 1)
+        self.assertEqual((cmds[0]["exit_code"], cmds[0]["last_line"], cmds[0]["type"], cmds[0]["recorded_by"]),
+                         (4, "3 passed", "test", "exec"))
+
+    def test_exec_without_a_command_or_with_a_bad_gate_changes_nothing(self):
+        run, _ = self.init()
+        before = (run / "gates.json").read_text()
+        self.assertEqual(self.exec_cmd(run, "G9", "--", "true").returncode, 2)
+        self.assertEqual(self.exec_cmd(run, "G3").returncode, 2)
+        self.assertEqual((run / "gates.json").read_text(), before)
+
+    def test_exec_records_a_command_that_cannot_start(self):
+        run, _ = self.init()
+        r = self.exec_cmd(run, "G4", "--", "no-such-binary-etk")
+        self.assertEqual(r.returncode, 127)
+        cmd = json.loads((run / "gates.json").read_text())["gates"]["G4"]["commands"][0]
+        self.assertEqual(cmd["exit_code"], 127)
+
+    def test_check_warns_on_pass_commands_not_recorded_by_exec(self):
+        run, ledger = self.init()
+        self.write(run, self.complete_ledger(ledger))
+        r = self.check(run)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("warning: G3: `npm test` was not recorded by `etk_run.py exec`", r.stdout)
+        ledger["gates"]["G3"]["commands"][0]["recorded_by"] = "exec"
+        ledger["gates"]["G4"]["commands"][0]["recorded_by"] = "exec"
+        self.write(run, ledger)
+        self.assertNotIn("not recorded by", self.check(run).stdout)
+
+    def test_launcher_exposes_exec_but_not_through_run(self):
+        run, _ = self.init()
+        etk_sh = str(ROOT / "scripts" / "etk.sh")
+        r = sh(["sh", etk_sh, "exec", "G3", "--type", "test", "--", "true"], self.dir)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(json.loads((run / "gates.json").read_text())["gates"]["G3"]["commands"]), 1)
+        marker = self.dir / "ran"
+        r = sh(["sh", etk_sh, "run", "exec", "G3", "--", "touch", str(marker)], self.dir)
+        self.assertEqual(r.returncode, 2)
+        self.assertFalse(marker.exists(), "`etk.sh run exec` must not run commands: skills pre-approve `run:*`")
+
     def test_malformed_ledger_gives_messages_not_tracebacks(self):
         run, ledger = self.init()
         ledger = self.complete_ledger(ledger)

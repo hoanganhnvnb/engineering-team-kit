@@ -4,13 +4,25 @@
 # deleted venv), so each candidate is tried before it's used.
 #   etk.sh discover            project snapshot
 #   etk.sh run <args...>       ledger: init / check / render / stats / latest
+#   etk.sh exec <gate> --type <t> -- <cmd...>
+#                              run a command and record its real exit code in the ledger
+# `exec` is its own entry point on purpose: the skills pre-approve `etk.sh run:*`, and a
+# pre-approved `run exec` would let any command skip the permission prompt.
 dir=$(dirname "$0")
 case "$1" in
   discover) script="$dir/discover.py" ;;
-  run) script="$dir/etk_run.py" ;;
-  *) echo "usage: etk.sh discover | run <args>" >&2; exit 2 ;;
+  run)
+    if [ "${2:-}" = exec ]; then
+      echo "use \`etk.sh exec ...\`, not \`etk.sh run exec ...\`" >&2
+      exit 2
+    fi
+    script="$dir/etk_run.py" ;;
+  exec) script="$dir/etk_run.py" ;;
+  *) echo "usage: etk.sh discover | run <args> | exec <gate> --type <t> -- <cmd>" >&2; exit 2 ;;
 esac
-shift
+if [ "$1" != exec ]; then
+  shift
+fi
 for py in python3 /usr/bin/python3 /usr/local/bin/python3 python; do
   if "$py" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
     exec "$py" "$script" "$@"

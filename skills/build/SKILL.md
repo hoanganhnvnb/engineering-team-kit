@@ -96,7 +96,10 @@ Follow `${CLAUDE_PLUGIN_ROOT}/workflows/review-loop.md`:
 ## 5. Gates
 
 Fill G1–G6 in the ledger per `${CLAUDE_PLUGIN_ROOT}/quality/gates.md`. G3/G4 `PASS`
-entries list every command with its real exit code. Then:
+entries list every command with its real exit code. Prefer recording them with
+`sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" exec G3 --type test -- <cmd>`, which runs the
+command and writes the real exit code into the ledger (it asks for permission, by design).
+Then:
 
 ```bash
 sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" run check

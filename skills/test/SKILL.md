@@ -31,7 +31,8 @@ You are the **Lead** running a QA pass. Nothing counts unless it actually ran.
    Add `engineering-team:ux-reviewer` in parallel if the scope includes UI and a browser
    tool is available.
 5. **Check the QA report.** Re-run at least one of the commands it reports to confirm the
-   numbers. Record defects as findings and commands with exit codes in G3/G4.
+   numbers. Record defects as findings and commands with exit codes in G3/G4, preferably
+   with `etk.sh exec G3 --type test -- <cmd>` (see `${CLAUDE_PLUGIN_ROOT}/quality/gates.md`).
 6. **New tests.** QA may create new test files for gaps or defects. List them. Keep the
    ones that are correct and useful. Delete the ones that aren't, and say so. Don't fix
    source code in this command. If defects are found, suggest
