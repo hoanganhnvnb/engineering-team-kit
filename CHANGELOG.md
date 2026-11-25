@@ -3,7 +3,7 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
-## Unreleased
+## 0.5.0
 
 - New `/engineering-team:readme`: audits the README against the real repository,
   rewrites it with the design rules in `workflows/readme.md`, and has a fresh reviewer
@@ -14,6 +14,10 @@ All notable changes to this plugin. Versions follow semver; the version in
   and the pyenv, uv, asdf and mise version folders, so a `python3` shim that points at an
   old version no longer hides an installed 3.12. The "not found" message now says how to
   install one.
+- **Security:** subagents can no longer write anything under `~/.claude` (settings, installed
+  plugins including the guard hook's own code), `~/.claude.json`, or the Python folders and
+  shims the launchers search. The hook also blocks the call when its Python finder is missing, in
+  every shell, and a candidate interpreter must report that it is 3.12+ itself.
 
 ## 0.4.0
 
