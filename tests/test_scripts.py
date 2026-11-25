@@ -685,6 +685,24 @@ class DiscoverTests(unittest.TestCase):
         self.assertIn("### Path-scoped rules", out)
         self.assertNotIn("discover.py failed", out)
 
+    def test_skills_named_like_build_output_are_found(self):
+        skill = "---\nname: {n}\ndescription: does {n}\n---\n"
+        files = {".claude/skills/build/SKILL.md": skill.format(n="build"),
+                 "skills/test/SKILL.md": skill.format(n="test")}
+        d = self.project(files)
+        out = sh([sys.executable, str(DISCOVER)], d).stdout
+        self.assertIn(".claude/skills/build/SKILL.md", out)
+        self.assertIn("skills/test/SKILL.md", out)
+        self.assertIn("tests: ✗", out)
+        # same layout without git: only top-level build dirs are skipped
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, content in {**files, "build/out.md": "x", "vendor/skills/x/SKILL.md": skill.format(n="x")}.items():
+                (Path(tmp) / name).parent.mkdir(parents=True, exist_ok=True)
+                (Path(tmp) / name).write_text(content)
+            out = sh([sys.executable, str(DISCOVER)], tmp).stdout
+        self.assertIn(".claude/skills/build/SKILL.md", out)
+        self.assertNotIn("vendor/skills/x/SKILL.md", out)
+
     def test_launcher_skips_broken_python(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)

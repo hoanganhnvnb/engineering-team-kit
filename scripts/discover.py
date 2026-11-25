@@ -42,13 +42,44 @@ def find_root(start: Path) -> Path:
     return Path(top) if top else start
 
 
+def git_files(root: Path) -> list[str] | None:
+    """Tracked + untracked-not-ignored paths, or None when this isn't a git work tree."""
+    try:
+        out = subprocess.run(["git", "ls-files", "-co", "--exclude-standard", "-z"], cwd=root,
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    return [n for n in out.stdout.split("\0") if n]
+
+
 def walk(root: Path, max_depth: int):
+    """Yield (dir, filenames) down to max_depth.
+
+    Inside git the file list comes from git, so ignore rules decide what is skipped and a
+    tracked `skills/build/` is never mistaken for build output. Without git, SKIP_DIRS applies
+    to top-level directories only.
+    """
+    listed = git_files(root)
+    if listed is not None:
+        by_dir: dict[str, list[str]] = {}
+        for n in listed:
+            if n.startswith((".etk/", ".claude/worktrees/")) or not (root / n).is_file():
+                continue
+            d, _, f = n.rpartition("/")
+            if d and d.count("/") + 1 > max_depth:
+                continue
+            by_dir.setdefault(d, []).append(f)
+        for d in sorted(by_dir):
+            yield root / d, by_dir[d]
+        return
     root_depth = len(root.parts)
     for dirpath, dirnames, filenames in os.walk(root):
         here = Path(dirpath).relative_to(root)
         dirnames[:] = [
             d for d in dirnames
-            if d not in SKIP_DIRS and (here / d).as_posix() not in SKIP_DIRS
+            if (here / d).as_posix() not in SKIP_DIRS
         ]
         if len(Path(dirpath).parts) - root_depth >= max_depth:
             dirnames[:] = []
@@ -132,8 +163,10 @@ def hard_checks(root: Path, names: set[str], pkg, ci: list[str]) -> list[str]:
            + has(pyproj, "[tool.black") + [f"{r} (ruff format)" for r in ruff[:1]]
            + [f"{n} (gofmt)" for n in ("go.mod",) if n in names] + [f"{n} (rustfmt)" for n in ("Cargo.toml",) if n in names])
     # tests: a test dir/file anywhere in the walked list, or a declared test script
-    tests = [n for n in sorted(names) if re.search(r"(^|/)(tests?|__tests__|spec)/", n)
-             or re.search(r"(_test\.go|\.(test|spec)\.[a-z]+|(^|/)test_[^/]*\.py)$", n)][:1]
+    tests = [n for n in sorted(names)
+             if re.search(r"(^|/)(tests?|spec)/.*\.(py|rb|php|js|jsx|ts|tsx|go|rs|java|kt|cs|sh)$", n)
+             or re.search(r"(^|/)__tests__/[^/]+\.[a-z]+$", n)
+             or re.search(r"(_test\.[a-z]+|\.(test|spec)\.[a-z]+|(^|/)test_[^/]*\.py)$", n)][:1]
     scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
     script = str(scripts.get("test", ""))
     if script and "no test specified" not in script:
