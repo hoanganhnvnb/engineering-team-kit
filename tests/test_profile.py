@@ -878,26 +878,72 @@ class StoreTests(Base):
         self.git(d, "config", "--unset", "url.https://evil.example/.insteadOf")  # the redirect disappears
         self.assertEqual(self.authorize(d, run, "push").returncode, 2)
 
-    def test_act_push_rechecks_the_binding_the_profile_authorized(self):
-        remote = "https://github.com/victim/prod.git"
-        d = self.repo("act", remote)
+    def etk_run(self, cwd, *args):
+        return subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), *args], cwd=cwd, env=self.env,
+                              capture_output=True, text=True, timeout=60)
+
+    def ship_ready(self, d, remote="https://github.com/victim/prod.git"):
+        """A confirmed profile with push auto, a ship run whose gates pass, and a profile push authorization."""
         self.ok(d, "set", "release.push", "auto")
         self.ok(d, "set", "release.commit", "auto")
         self.ok(d, "confirm")
         run = self.open_run(d)
+        led = json.loads((Path(run) / "gates.json").read_text())
+        led["acceptance_criteria"] = [{"id": "AC-1", "text": "it works", "status": "met"}]
+        for g in led["gates"]:
+            led["gates"][g] = {"status": "PASS", "evidence": "checked carefully with evidence", "commands": []}
+        for g in ("G3", "G4"):
+            led["gates"][g]["commands"] = [{"cmd": "t", "exit_code": 0, "type": "test", "recorded_by": "exec"}]
+        led["gates"]["G4"]["commands"].append({"cmd": "r", "exit_code": 0, "type": "runtime", "recorded_by": "exec"})
+        led["gates"]["G7"] = {"status": "NOT_RUN", "evidence": "", "commands": []}
+        (Path(run) / "gates.json").write_text(json.dumps(led))
         self.assertEqual(self.authorize(d, run, "push").returncode, 0)
+        return run
 
-        def act():
-            return subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), "act", "--action", "push",
-                                   "--ref", "x", "--exit", "0", "--force-record" if False else "--target", "origin", run],
-                                  cwd=d, env=self.env, capture_output=True, text=True, timeout=60)
+    def act(self, d, run, *extra, data=True):
+        return self.etk_run(d, "act", "--action", "push", "--ref", "x", "--exit", "0",
+                            *(["--data", str(self.data)] if data else []), *extra, run)
+
+    def test_act_push_rechecks_the_binding_the_profile_authorized(self):
+        d = self.repo("act", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
         self.git(d, "config", "--add", "remote.origin.pushurl", "https://evil.example/x.git")
-        r = act()
+        r = self.act(d, run)
         self.assertEqual(r.returncode, 2, r.stdout)
         self.assertIn("changed since the profile authorized it", r.stderr)
         self.assertNotIn("evil", r.stderr + r.stdout)
         self.git(d, "config", "--unset-all", "remote.origin.pushurl")
-        self.assertNotIn("changed since the profile authorized it", act().stderr)
+        self.assertEqual(self.act(d, run).returncode, 0)
+        self.assertIs(json.loads((Path(run) / "gates.json").read_text())["actions"][0]["binding_ok"], True)
+
+    def test_act_needs_data_to_recheck_a_profile_authorized_push(self):
+        d = self.repo("nodata", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        r = self.act(d, run, data=False)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--data", r.stderr)
+
+    def test_force_record_of_a_moved_binding_fails_check(self):
+        d = self.repo("force", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        self.assertEqual(self.etk_run(d, "check", run).returncode, 0)
+        self.git(d, "config", "--add", "remote.origin.pushurl", "https://evil.example/x.git")
+        self.assertEqual(self.act(d, run).returncode, 2)
+        r = self.act(d, run, "--force-record")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("binding had moved", r.stdout)
+        self.assertIs(json.loads((Path(run) / "gates.json").read_text())["actions"][0]["binding_ok"], False)
+        r = self.etk_run(d, "check", run)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("binding had moved", r.stdout + r.stderr)
+        self.assertNotIn("evil", r.stdout + r.stderr)
+
+    def test_force_record_without_a_moved_binding_is_clean(self):
+        d = self.repo("forceok", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        self.assertEqual(self.act(d, run, "--force-record").returncode, 0)
+        self.assertIs(json.loads((Path(run) / "gates.json").read_text())["actions"][0]["binding_ok"], True)
+        self.assertEqual(self.etk_run(d, "check", run).returncode, 0)
 
     def test_local_path_origins_and_parsed_remotes_have_different_keys(self):
         local = self.repo("loc", "github.com/o/r")

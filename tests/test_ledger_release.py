@@ -264,7 +264,7 @@ class ReleaseLedgerTests(unittest.TestCase):
 
     def test_action_without_authorization_fails_check(self):
         run = self.ship_run()
-        r = self.etk("act", "--action", "push", "--target", "origin/feat", "--exit", "0", str(run))
+        r = self.etk("act", "--action", "push", "--data", str(self.data), "--target", "origin/feat", "--exit", "0", str(run))
         self.assertEqual(r.returncode, 0, r.stderr)
         out = self.check(run).stdout
         self.assertIn("no authorization", out)
@@ -280,7 +280,7 @@ class ReleaseLedgerTests(unittest.TestCase):
     def test_authorized_push_after_gates_completes(self):
         run = self.ship_run()
         self.auth_profile(run, "push")
-        r = self.etk("act", "--action", "push", "--target", "origin/feat", "--ref", "abc123", "--exit", "0", str(run))
+        r = self.etk("act", "--action", "push", "--data", str(self.data), "--target", "origin/feat", "--ref", "abc123", "--exit", "0", str(run))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(self.ledger(run)["actions"][0]["gates_ok"])
         r = self.complete(run)
@@ -293,12 +293,12 @@ class ReleaseLedgerTests(unittest.TestCase):
         run, _ = self.init("--kind", "ship")
         self.etk("authorize", "--action", "push", "--source", "prompt", "--quote", "push when ready", str(run))
         before = (run / "gates.json").read_text()
-        r = self.etk("act", "--action", "push", "--exit", "0", str(run))
+        r = self.etk("act", "--action", "push", "--data", str(self.data), "--exit", "0", str(run))
         self.assertEqual(r.returncode, 2)
         self.assertIn("run ready", r.stderr)
         self.assertEqual((run / "gates.json").read_text(), before)
         # a push that already happened is still recorded, as released before the gates passed
-        r = self.etk("act", "--action", "push", "--exit", "0", "--force-record", str(run))
+        r = self.etk("act", "--action", "push", "--data", str(self.data), "--exit", "0", "--force-record", str(run))
         self.assertIn("gates had not passed", r.stdout)
         self.assertFalse(self.ledger(run)["actions"][0]["gates_ok"])
         out = self.check(run).stdout
@@ -324,7 +324,7 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("G3 is FAIL", r.stdout)
         self.assertIn("G4 is FAIL", r.stdout)
-        self.assertEqual(self.etk("act", "--action", "push", "--exit", "0", str(run)).returncode, 2)
+        self.assertEqual(self.etk("act", "--action", "push", "--data", str(self.data), "--exit", "0", str(run)).returncode, 2)
         led = self.passing(led, g7=False)
         led["gates"]["G5"] = {"status": "NOT_APPLICABLE", "evidence": "no UI in this change at all"}
         led["findings"] = [{"id": "R1", "severity": "high", "location": "a.py:1", "evidence": "repro: f(0) raises",
@@ -356,7 +356,7 @@ class ReleaseLedgerTests(unittest.TestCase):
                 self.assertEqual(r.returncode, 2, (kind, action))
                 self.assertIn("can't release", r.stderr)
             self.assertEqual((run / "gates.json").read_text(), before)
-            r = self.etk("act", "--action", "push", "--exit", "0", "--force-record", str(run))
+            r = self.etk("act", "--action", "push", "--data", str(self.data), "--exit", "0", "--force-record", str(run))
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertIn(f"action #1 (push): a {kind} run can't release", self.check(run).stdout)
         run, led = self.init("--kind", "fix")
@@ -513,7 +513,7 @@ class ReleaseLedgerTests(unittest.TestCase):
     def test_failed_action_blocks_complete(self):
         run = self.ship_run()
         self.auth_profile(run, "push")
-        self.etk("act", "--action", "push", "--exit", "1", str(run))
+        self.etk("act", "--action", "push", "--data", str(self.data), "--exit", "1", str(run))
         out = self.complete(run, g7="FAIL").stdout
         self.assertIn("COMPLETE but action #1 (push) exited 1", out)
         out = self.complete(run, g7="PASS").stdout
@@ -522,20 +522,20 @@ class ReleaseLedgerTests(unittest.TestCase):
     def test_successful_retry_settles_a_failed_action(self):
         run = self.ship_run()
         self.auth_profile(run, "push")
-        self.etk("act", "--action", "push", "--target", "origin", "--exit", "1", str(run))
-        self.etk("act", "--action", "push", "--target", "other", "--exit", "0", str(run))
+        self.etk("act", "--action", "push", "--data", str(self.data), "--target", "origin", "--exit", "1", str(run))
+        self.etk("act", "--action", "push", "--data", str(self.data), "--target", "other", "--exit", "0", str(run))
         out = self.complete(run).stdout
         self.assertIn("action #1 (push origin) exited 1", out)  # a different target doesn't settle it
-        self.etk("act", "--action", "push", "--target", "origin", "--exit", "0", str(run))
+        self.etk("act", "--action", "push", "--data", str(self.data), "--target", "origin", "--exit", "0", str(run))
         r = self.complete(run)
         self.assertEqual(r.returncode, 0, r.stdout)
-        self.etk("act", "--action", "push", "--target", "origin", "--exit", "1", str(run))
+        self.etk("act", "--action", "push", "--data", str(self.data), "--target", "origin", "--exit", "1", str(run))
         self.assertIn("action #4 (push origin) exited 1", self.complete(run).stdout)  # a later failure counts
 
     def test_pending_l4_decision_blocks_complete(self):
         run = self.ship_run()
         self.auth_profile(run, "push")
-        self.etk("act", "--action", "push", "--exit", "0", str(run))
+        self.etk("act", "--action", "push", "--data", str(self.data), "--exit", "0", str(run))
         r = self.etk("decide", "--id", "D1", "--level", "L4", "--question", "Drop the legacy table?",
                      "--options", "yes|no", "--recommended", "no", str(run))
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -603,7 +603,7 @@ class ReleaseLedgerTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
         self.write(run, {**led, "actions": 5})
         before = (run / "gates.json").read_text()
-        self.assertEqual(self.etk("act", "--action", "push", "--exit", "0", str(run)).returncode, 2)
+        self.assertEqual(self.etk("act", "--action", "push", "--data", str(self.data), "--exit", "0", str(run)).returncode, 2)
         self.assertEqual((run / "gates.json").read_text(), before)
 
     # --- which run gets picked ------------------------------------------------------------

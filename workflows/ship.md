@@ -21,7 +21,8 @@ report what is missing, and ask.
   ledger. `run act` refuses commit/push/pr/merge/tag/deploy while `ready` fails (a local commit
   is exempt only from the run-kind rule: review and test runs never push or deploy); use
   `--force-record` only to record a step that already happened (it is stored with
-  `gates_ok: false` and `check` then fails the run).
+  `gates_ok: false`, and `binding_ok: false` if a profile-authorized push or PR no longer
+  matched; `check` then fails the run).
 - G3/G4 were recorded through `etk exec`, not typed by hand.
 - A user-visible change was driven for real once (a `runtime` command or a G5 PASS).
 - `release.wait_ci` is set: CI on the pushed commit is green before merging or deploying.
@@ -89,7 +90,8 @@ etk run authorize --action deploy --target staging --source prompt \
   (`authorize --action tag`): for a `ci-on-tag` target, the deploy permission counts
   only if it also says release or tag. Otherwise ask at the planning gate.
 - Record each step with `etk run act --action push|pr|merge|tag --target … --ref …
-  --url … --exit <code> RUN`.
+  --url … --exit <code> RUN`; add `--data DATA` for push and pr, which re-checks the binding
+  as an audit after the fact.
 
 ## 4. Deploy
 

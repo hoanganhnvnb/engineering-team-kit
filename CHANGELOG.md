@@ -3,6 +3,12 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
+## Unreleased
+
+- Security: the check in `etk run act` of a profile-authorized push or PR now records `binding_ok` for
+  push and PR, also with `--force-record`, and `etk run check` fails a run whose push or PR was
+  recorded with `binding_ok: false`. A profile-authorized push or PR needs `--data` on `act`.
+
 ## 0.6.0
 
 - New `/engineering-team:init`: run it once at the start of a project. It detects the VCS,

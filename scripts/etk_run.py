@@ -558,6 +558,12 @@ def validate_release(ledger: dict, kind, outcome, gates: dict, skip: frozenset, 
             failed.append((n, act, target.lower(), label + f" exited {ac['exit']}"))
         else:
             succeeded.append((n, act, target.lower()))
+        if "binding_ok" in ac and type(ac["binding_ok"]) is not bool:
+            errors.append(f"{label}: binding_ok must be true or false (record actions with `act`)")
+            continue
+        if ac.get("binding_ok") is False:
+            errors.append(f"{label}: the profile's binding had moved when it was recorded (checkout, URLs or "
+                          "git push settings differ from what the profile authorized, or `act` had no --data to check)")
         if act in GATED_ACTIONS and not ac["gates_ok"]:
             errors.append(f"{label}: released before the gates passed (gates_ok false when it ran)")
         if act in OUTWARD_ACTIONS and kind not in NEEDS_AC:
@@ -846,7 +852,7 @@ def cmd_authorize(a) -> int:
     return update_ledger(a.path, change)
 
 
-def profile_authorization_moved(led: dict, action: str) -> str | None:
+def profile_authorization_moved(led: dict, action: str, raw_data: str | None) -> str | None:
     """Why a push or PR the workflow profile pre-authorized may not go ahead now: the checkout or
     any origin or push URL differs from what the profile was confirmed for when it was authorized.
     A user's own words for the action (prompt, answer) don't depend on the profile."""
@@ -854,6 +860,9 @@ def profile_authorization_moved(led: dict, action: str) -> str | None:
              if isinstance(x, dict) and x.get("action") == action]
     if not auths or any(x.get("source") in {"prompt", "answer"} for x in auths):
         return None
+    if not raw_data:
+        return (f"the profile's binding can't be re-checked without --data DIR (the plugin data dir), "
+                f"which a profile-authorized {action} needs")
     now = etk_profile.binding(etk_profile.identify())
     now.pop("key", None)
     for x in auths:
@@ -912,8 +921,9 @@ def cmd_act(a) -> int:
 
     def change(led):
         actions = ledger_list(led, "actions")
+        moved = None
         if a.action in {"push", "pr"}:
-            moved = profile_authorization_moved(led, a.action)
+            moved = profile_authorization_moved(led, a.action, a.data)
             if moved and not a.force_record:
                 refuse(f"{a.action} refused: {moved}")
         wrong_kind = kind_blocker(led)
@@ -928,8 +938,11 @@ def cmd_act(a) -> int:
         actions.append({"action": a.action, "target": a.target or "", "ref": a.ref or "", "url": a.url or "",
                         "command": a.command or "", "exit": a.exit, "production": production,
                         "at": now_iso(), "gates_ok": ok})
+        if a.action in {"push", "pr"}:
+            actions[-1]["binding_ok"] = not moved
         return (f"recorded {a.action}{' ' + a.target if a.target else ''} exit {a.exit}"
-                + (" (production)" if production else "") + ("" if ok else " (gates had not passed)"))
+                + (" (production)" if production else "") + ("" if ok else " (gates had not passed)")
+                + (" (binding had moved)" if moved else ""))
     return update_ledger(a.path, change)
 
 
@@ -1193,10 +1206,12 @@ def main() -> int:
     ac.add_argument("--exit", required=True, type=int)
     ac.add_argument("--production", action="store_true")
     ac.add_argument("--data", default=None, metavar="DIR",
-                    help="plugin data dir, required for deploy/rollback: a target the profile marks production "
-                         "is recorded as production")
+                    help="plugin data dir: required for deploy/rollback (a target the profile marks production "
+                         "is recorded as production) and for a push or PR the profile authorized (its binding "
+                         "is re-checked)")
     ac.add_argument("--force-record", action="store_true",
-                    help="record a step that already happened although `ready` fails (gates_ok false)")
+                    help="record a step that already happened although `ready` fails (gates_ok false) or the "
+                         "profile's binding moved (binding_ok false); `check` fails both")
     de = sub.add_parser("decide", help="record or update a decision by id")
     de.add_argument("--id", required=True)
     de.add_argument("--level", default=None, choices=sorted(DECISION_LEVELS), help="required for a new id")

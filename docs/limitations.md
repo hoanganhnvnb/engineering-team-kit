@@ -78,7 +78,7 @@ Honest list. If one of these bites you, an issue is welcome.
   `.git/config`, `.git/hooks/`, `.git/info/`, `~/.gitconfig` or `~/.config/git/`, because those
   decide where the Lead pushes or what git runs for it. The profile is looked up by the
   origin URL; its `auto` settings only count in the checkout and for the push URL it was
-  confirmed with (a hash of the raw list of every push URL and fetch URL of `origin`, in order, never parsed; `release.push: auto` also needs a plain `git push` to go to `origin`). Known limits: `git remote get-url` does not see a push configured outside git (a wrapper or alias), and the check at push time compares what `git` reports then, not what the push command finally does. A copy of the scripts, or inline code that builds the
+  confirmed with (a hash of the raw list of every push URL and fetch URL of `origin`, in order, never parsed; `release.push: auto` also needs a plain `git push` to go to `origin`). `etk run act` repeats the check when it records the step, and that record is only an audit: it stores `binding_ok: false` (also with `--force-record`) and `run check` then fails the run. Known limits: `git remote get-url` does not see a push configured outside git (a wrapper or alias), and the check at push time compares what `git` reports then, not what the push command finally does. A copy of the scripts, or inline code that builds the
   path at runtime, gets past that, like any other guard gap. `run check` still requires
   every release action to match a permission that quotes your words, and the Lead,
   not a subagent, runs every outward step.
