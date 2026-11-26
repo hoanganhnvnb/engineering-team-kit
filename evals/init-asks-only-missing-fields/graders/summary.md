@@ -1,9 +1,12 @@
 ---
 type: llm
 ---
-The final message ends with a short summary of at most about 5 lines that says (1) what was
-detected, (2) what was saved or that nothing could be saved, (3) where the profile file lives,
-and (4) a next command to try (build, fix or team). PASS only if all four are present and the
-message does not claim that the notes (language, parallelism, forbidden words) are enforced by
-the plugin. FAIL if it says the profile was confirmed when the user never saw or agreed to it,
-or if it claims any file in the repository was changed.
+The scenario has no question picker and no user to answer, so the run may stop with open
+questions instead of a final summary. Judge the final message in either case.
+PASS if it is (a) a short summary of at most about 5 lines covering what was detected, what
+was saved (or that nothing could be saved), where the profile file lives and a next command to
+try (build, fix or team), or (b) a report of what was detected and saved so far that asks the
+user to answer the remaining open fields (and says what happens next). In both cases it must
+not claim that the notes (language, parallelism, forbidden words) are enforced by the plugin.
+FAIL if it says the profile was confirmed when the user never saw or agreed to it, or if it
+claims any file in the repository was changed.

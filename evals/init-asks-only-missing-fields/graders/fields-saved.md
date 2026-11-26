@@ -1,7 +1,7 @@
 ---
 type: tool_used
 tool: Bash
-input_match: 'etk\.sh\\?"? profile\\?"? set '
+input_match: '(\bprofile\\?"?|\bP)\s+set\s+(vcs|host|branches|commit|release|deploy)\.'
 min: 1
 arm: with-only
 ---
