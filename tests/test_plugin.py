@@ -356,5 +356,42 @@ class PluginStructure(unittest.TestCase):
                     self.assertNotRegex(p.read_text(errors="ignore"), r"/home/[a-z]+/|/Users/[A-Za-z]+/")
 
 
+class InitEvalGraders(unittest.TestCase):
+    """The two negative graders must catch real violations however the shell is invoked,
+    and stay quiet on the commands init legitimately runs (a zero count proves nothing
+    if the pattern can never match)."""
+
+    D = ROOT / "evals" / "init-asks-only-missing-fields" / "graders"
+
+    def pattern(self, name):
+        m = re.search(r"^input_match: '(.*)'$", (self.D / name).read_text(), re.M)
+        self.assertIsNotNone(m, name)
+        return re.compile(m.group(1))
+
+    GOOD = [
+        "D=/x; E=/y/etk.sh; sh $E profile detect --data $D; echo ---; sh $E discover --data $D",
+        "P(){ sh /t/etk.sh profile \"$@\"; }\nP set vcs.type '\"git\"' --data $D\nP set host.cli '\"gh\"' --data $D",
+        "sh $E profile remember note \"never run git push or rm -rf here\" --data $D",
+        "sh $E profile show --brief --data $D 2>&1",
+        "sh $E discover --data $D >/dev/null 2>&1",
+    ]
+
+    def test_release_grader(self):
+        p = self.pattern("no-release-actions.md")
+        for c in self.GOOD:
+            self.assertIsNone(p.search(c), c)
+        for c in ["git push -u origin x", "cd r && git commit -m x", "D=1; git -C . tag v1", "gh pr create",
+                  "x; gh release create", "sh $E run init t --kind small", "sh /p/etk.sh run authorize --action push"]:
+            self.assertIsNotNone(p.search(c), c)
+
+    def test_write_grader(self):
+        p = self.pattern("no-shell-writes.md")
+        for c in self.GOOD:
+            self.assertIsNone(p.search(c), c)
+        for c in ["echo a > f.txt", "echo a >> f", "printf x | tee f", "mkdir -p d", "D=1; touch f",
+                  "sed -i s/a/b/ f", "rm -rf x", "cd r; git add .", "git init", "git config user.name x", "\nmv a b"]:
+            self.assertIsNotNone(p.search(c), c)
+
+
 if __name__ == "__main__":
     unittest.main()
