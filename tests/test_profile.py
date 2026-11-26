@@ -900,6 +900,9 @@ class StoreTests(Base):
         self.assertEqual(self.authorize(d, run, "push").returncode, 0)
         return run
 
+    def preflight(self, d, run, action="push"):
+        return self.etk_run(d, "preflight", "--action", action, "--data", str(self.data), run)
+
     def act(self, d, run, *extra, data=True):
         return self.etk_run(d, "act", "--action", "push", "--ref", "x", "--exit", "0",
                             *(["--data", str(self.data)] if data else []), *extra, run)
@@ -922,6 +925,47 @@ class StoreTests(Base):
         r = self.act(d, run, data=False)
         self.assertEqual(r.returncode, 2)
         self.assertIn("--data", r.stderr)
+
+    def test_preflight_refuses_a_push_the_binding_no_longer_allows(self):
+        remote = "https://github.com/victim/prod.git"
+        d = self.repo("pre", remote)
+        run = self.ship_ready(d)
+        for action in ("push", "pr"):
+            self.assertEqual(self.etk_run(d, "authorize", "--action", action, "--source", "profile", "--data",
+                                          str(self.data), run).returncode, 0 if action == "push" else 2)
+        r = self.preflight(d, run)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("PREFLIGHT OK", r.stdout)
+        # a test run by `etk exec` adds a second push URL after the authorization was recorded
+        self.git(d, "config", "--add", "remote.origin.pushurl", "https://evil.example/x.git")
+        r = self.preflight(d, run)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("changed since the profile authorized it", r.stdout)
+        self.assertNotIn("evil", r.stdout + r.stderr)
+        self.assertEqual(self.preflight(d, run, "pr").returncode, 1)  # nothing authorized a PR, but the push check
+        self.git(d, "config", "--unset-all", "remote.origin.pushurl")
+        self.assertEqual(self.preflight(d, run).returncode, 0)
+        # a plain push that goes to another remote
+        self.git(d, "remote", "add", "decoy", remote)
+        self.git(d, "config", "remote.pushDefault", "decoy")
+        r = self.preflight(d, run)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no longer goes to origin", r.stdout)
+        self.git(d, "config", "--unset", "remote.pushDefault")
+        # the gates still count: preflight includes `ready`
+        led = json.loads((Path(run) / "gates.json").read_text())
+        led["gates"]["G3"]["status"] = "FAIL"
+        (Path(run) / "gates.json").write_text(json.dumps(led))
+        self.assertEqual(self.preflight(d, run).returncode, 1)
+        self.assertEqual(self.preflight(d, run, "pr").returncode, 1)
+        self.assertEqual(self.etk_run(d, "preflight", "--action", "push", run).returncode, 1)  # no --data
+
+    def test_preflight_needs_no_profile_when_the_user_authorized_the_push(self):
+        d = self.repo("words", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        self.etk_run(d, "authorize", "--action", "push", "--source", "prompt", "--quote", "push it when green", run)
+        self.git(d, "config", "--add", "remote.origin.pushurl", "https://evil.example/x.git")
+        self.assertEqual(self.etk_run(d, "preflight", "--action", "push", run).returncode, 0)
 
     def test_force_record_of_a_moved_binding_fails_check(self):
         d = self.repo("force", "https://github.com/victim/prod.git")

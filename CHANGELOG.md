@@ -5,10 +5,14 @@ All notable changes to this plugin. Versions follow semver; the version in
 
 ## Unreleased
 
-- Security: the check in `etk run act` of a profile-authorized push or PR now records `binding_ok` for
-  push and PR, also with `--force-record`, and `etk run check` fails a run whose push or PR was
-  recorded with `binding_ok: false`. A profile-authorized push or PR needs `--data` on `act`.
-
+- Security: `etk run preflight --action push|pr --data DIR [RUN]` re-checks, right before
+  `git push` and `gh pr create`, that the run is `ready` and that a profile-authorized push or
+  PR still matches what the profile was confirmed for (checkout, origin and push URLs, and a plain
+  `git push` going to `origin`). It exits 1 with the reason and nothing is sent. `workflows/ship.md` and the `team` skill run it before
+  each outward push or PR. The check in `etk run act` is an audit made after the step: it now
+  records `binding_ok` for push and PR, also with `--force-record`, and `etk run check` fails a
+  run whose push or PR was recorded with `binding_ok: false`. A profile-authorized push or PR
+  needs `--data` on `act`.
 ## 0.6.0
 
 - New `/engineering-team:init`: run it once at the start of a project. It detects the VCS,

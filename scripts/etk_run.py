@@ -9,6 +9,7 @@
     etk_run.py exec G3 --type test [--run RUN_DIR] -- <cmd>   # run <cmd>, record its real exit code
     etk_run.py phase <name> [RUN]             # move the run to a phase (intake ... done)
     etk_run.py ready [RUN]                    # exit 0 only if a release step may run now (else lists why)
+    etk_run.py preflight --action push|pr [--data DIR] [RUN]   # run right before `git push` / `gh pr create`
     etk_run.py authorize --action A --source S --quote "Q" [--target T] [--condition C] [--data DIR] [RUN]
     etk_run.py act --action A [--target T] [--ref R] [--url U] [--command C] --exit N [--production]
                    [--data DIR] [--force-record] [RUN]      # --data is required for deploy/rollback
@@ -854,7 +855,8 @@ def cmd_authorize(a) -> int:
 
 def profile_authorization_moved(led: dict, action: str, raw_data: str | None) -> str | None:
     """Why a push or PR the workflow profile pre-authorized may not go ahead now: the checkout or
-    any origin or push URL differs from what the profile was confirmed for when it was authorized.
+    any origin or push URL differs from what the profile was confirmed for when it was authorized,
+    or a plain `git push` no longer goes to `origin`.
     A user's own words for the action (prompt, answer) don't depend on the profile."""
     auths = [x for x in ledger_list(led, "authorizations")
              if isinstance(x, dict) and x.get("action") == action]
@@ -863,13 +865,15 @@ def profile_authorization_moved(led: dict, action: str, raw_data: str | None) ->
     if not raw_data:
         return (f"the profile's binding can't be re-checked without --data DIR (the plugin data dir), "
                 f"which a profile-authorized {action} needs")
-    now = etk_profile.binding(etk_profile.identify())
+    ident = etk_profile.identify()
+    now = etk_profile.binding(ident)
     now.pop("key", None)
-    for x in auths:
-        if x.get("source") == "profile" and x.get("binding") == now:
-            return None
-    return ("the checkout or the origin/push URLs changed since the profile authorized it "
-            "(or the authorization has no recorded binding); authorize it again")
+    if not any(x.get("source") == "profile" and x.get("binding") == now for x in auths):
+        return ("the checkout or the origin/push URLs changed since the profile authorized it "
+                "(or the authorization has no recorded binding); authorize it again")
+    if not ident["push_ok"]:
+        return "a plain `git push` no longer goes to origin (or origin has no push URL); authorize it again"
+    return None
 
 
 def profile_production(raw_data: str, target: str) -> bool | None:
@@ -900,6 +904,24 @@ def cmd_ready(a) -> int:
             print(f"- {b}")
         return 1
     print(f"READY: {p} (every required gate but G7 settled, ACs met, no blocking finding)")
+    return 0
+
+
+def cmd_preflight(a) -> int:
+    """Run right before `git push` / `gh pr create`: `ready`, plus the binding re-check of a
+    profile-authorized push or PR, which `act` can only audit after the fact."""
+    p = resolve(a.path)
+    led = load(p)
+    unauthorized = [] if any(isinstance(x, dict) and x.get("action") == a.action
+                             for x in ledger_list(led, "authorizations")) else [f"no {a.action} authorization is recorded"]
+    problems = (release_blockers(led) + unauthorized
+                + [b for b in [kind_blocker(led), profile_authorization_moved(led, a.action, a.data)] if b])
+    if problems:
+        print(f"NOT READY TO {a.action.upper()}: {len(problems)} thing(s) in {p}")
+        for b in problems:
+            print(f"- {b}")
+        return 1
+    print(f"PREFLIGHT OK: {a.action} may go ahead ({p})")
     return 0
 
 
@@ -1212,6 +1234,11 @@ def main() -> int:
     ac.add_argument("--force-record", action="store_true",
                     help="record a step that already happened although `ready` fails (gates_ok false) or the "
                          "profile's binding moved (binding_ok false); `check` fails both")
+    pf = sub.add_parser("preflight", help="right before a push or PR: ready, plus the profile binding re-check")
+    pf.add_argument("--action", required=True, choices=["push", "pr"])
+    pf.add_argument("--data", default=None, metavar="DIR", help="plugin data dir; needed when the profile authorized it")
+    pf.add_argument("path", nargs="?", metavar="RUN")
+    pf.set_defaults(fn=cmd_preflight)
     de = sub.add_parser("decide", help="record or update a decision by id")
     de.add_argument("--id", required=True)
     de.add_argument("--level", default=None, choices=sorted(DECISION_LEVELS), help="required for a new id")

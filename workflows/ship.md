@@ -74,6 +74,13 @@ etk run authorize --action deploy --target staging --source prompt \
 
 ## 3. Push and integrate
 
+- Immediately before `git push` and before `gh pr create` / `glab mr create`, run
+  `etk run preflight --action push|pr --data DATA RUN`. It must exit 0 (it includes `ready`,
+  and for a profile-authorized push or PR it re-checks the checkout, the origin and push URLs,
+  and that a plain push goes to `origin`).
+  Tests run repo code between authorization and push, so the check at `act` time comes too late
+  to stop a push. If it fails, do not push: show the reason, and ask for permission in the user's
+  words or have the profile confirmed again.
 - Push only the current branch, to `origin`, the remote the profile binds, because the profile
   hashes every push URL of `origin`: `git push -u origin <branch>`. Never
   `--force`. If the branch has no upstream, or you would push to a protected or
