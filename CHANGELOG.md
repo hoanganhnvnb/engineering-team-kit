@@ -3,8 +3,15 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
-## Unreleased
+## 0.6.0
 
+- New `/engineering-team:init`: run it once at the start of a project. It detects the VCS,
+  host, branches, commit style and test commands first, then asks only the missing
+  workflow fields (branching, commit, push, PR or merge, deploy) in at most two rounds,
+  plus an optional round of notes (docs language, how many subagents at once,
+  words that must never appear in commits). It saves to the profile outside the repository,
+  marks it confirmed only after you have seen it, and never writes into the repo, commits,
+  pushes, merges or deploys. Running it again first asks keep, change a field or reset, then only what is missing.
 - Security: a profile remembers where it was confirmed as the checkout path plus hashes of the
   raw URL lists of `origin`: every fetch URL (`git remote get-url --all origin`) and every push
   URL (`git remote get-url --push --all origin`), in order, as `git` reports them with
@@ -27,7 +34,9 @@ All notable changes to this plugin. Versions follow semver; the version in
   profile pre-authorize them. `set`, `unset` and `confirm` say which values they dropped, and
   `remember` no longer binds a profile without dropping them.
 - `profile show --brief` prints no URL and no path for a stale profile, only the reason (push
-  URLs or origin URLs changed, checkout moved).
+  URLs or origin URLs changed, checkout moved). `init` runs `git remote get-url --push --all
+  origin` itself and shows you each URL with everything between `://` and the last `@` of the
+  authority removed, and any `?query` and `#fragment`.
 - Upgrade note: profiles saved by 0.5.x are found again (the profile key still comes from the
   origin URL for plainly spelled remotes), but they hold plain-text URLs and no hashes, so
   they are treated as stale once: answer commit and push again and confirm. Remotes that are
@@ -39,6 +48,13 @@ All notable changes to this plugin. Versions follow semver; the version in
   shows such a remote as `(remote not shown)`.
 - `profile show --brief` now says `(unconfirmed)` whenever the settings changed after the
   last `profile confirm`, and `profile remember` ignores a note that is already saved.
+- Known limit: the notes are free text that the Lead reads through `profile show --json`;
+  `profile show --brief` only counts them and nothing enforces them.
+- `team`: when the profile is `missing`, it suggests `/engineering-team:init` in one line
+  and keeps the lazy questions as a fallback. `workflows/profile.md` stays the single source
+  of the question list and now tells the fallback to mention init.
+- Docs: `init` in usage, workflow, README and the Vietnamese README.
+- New eval case `init-asks-only-missing-fields` (written and linted, not run).
 
 ## 0.5.2
 
