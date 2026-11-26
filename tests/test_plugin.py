@@ -138,6 +138,30 @@ class PluginStructure(unittest.TestCase):
         self.assertIn("drop everything between `://` and the last `@` of the authority", ship)
         self.assertIn("`?query` and `#fragment`", ship)
 
+    def test_eval_runner_patches_every_snapshot_line(self):
+        """evals/run.sh rewrites each skill's `!` snapshot line, with or without --data, and skips skills without one."""
+        import shutil
+        import sys
+        import tempfile
+        script = (ROOT / "evals" / "run.sh").read_text()
+        code = re.search(r'"\$ETK_PY" - "\$tmp" <<\'EOF\'\n(.*?)\nEOF\n', script, re.S).group(1)
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copytree(ROOT / "skills", Path(tmp) / "skills")
+            r = subprocess.run([sys.executable, "-I", "-c", code, tmp], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            for name in SKILLS:
+                original = (ROOT / "skills" / name / "SKILL.md").read_text()
+                patched = (Path(tmp) / "skills" / name / "SKILL.md").read_text()
+                with self.subTest(skill=name):
+                    self.assertNotRegex(patched, r"(?m)^!`")
+                    if re.search(r"(?m)^!`", original):
+                        self.assertIn("Run this first with the Bash tool", patched)
+                    else:
+                        self.assertEqual(patched, original)
+        self.assertIn("a snapshot line was left", script)
+        self.assertIn("```", code, "the patch must skip code fences")
+        self.assertIn("--data", "".join(re.findall(r"discover\(\?:[^)]*\)\?", code)))
+
     def test_parallel_reviewers_get_distinct_id_prefixes(self):
         reviewer = (ROOT / "agents" / "code-reviewer.md").read_text()
         briefs = (ROOT / "workflows" / "briefs.md").read_text()
