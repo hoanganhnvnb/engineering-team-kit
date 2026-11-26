@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -167,11 +168,71 @@ def _safe_parts(url: str) -> tuple[str, str, str, str] | None:
     return None
 
 
-def url_hash(url) -> str | None:
-    """What a profile remembers of a remote: a hash of the raw string, never the string."""
+KEY_FILE = "binding.key"
+
+
+def _read_key(path: Path) -> bytes | None:
+    """The stored key, or None unless it is a regular file of ours that only we can read, holding 32
+    bytes as hex. Anything else (a link, loose permissions, garbage) counts as no key."""
+    try:
+        st = os.lstat(path)
+        if not stat.S_ISREG(st.st_mode) or st.st_mode & 0o077 or st.st_uid != os.getuid():
+            return None
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as f:
+            raw = f.read(129)
+        key = bytes.fromhex(raw.decode("ascii").strip())
+    except (OSError, ValueError):
+        return None
+    return key if len(key) == 32 else None
+
+
+def binding_key(data: Path | None, create: bool = False) -> bytes:
+    """The per-data-dir secret the binding hashes are keyed with (`binding.key`, mode 0600). Never
+    printed. Only a command that saves a profile (`create`) writes it, on first use; a read-only one
+    never writes and, without a usable key, gets a throwaway one that matches nothing. A missing or
+    unusable key is replaced by the next save, so every stored hash stops matching: profiles go
+    stale, which is the safe direction. Two processes creating it at once
+    end up with one key (`link` fails for the loser, who reads the winner's). When no key can be
+    stored, a throwaway one is returned: nothing stored will match it."""
+    fresh = os.urandom(32)
+    if data is None:
+        return fresh
+    path = data / KEY_FILE
+    key = _read_key(path)
+    if key or not create:
+        return key or fresh
+    tmp = None
+    try:
+        os.makedirs(data, mode=0o700, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=data, prefix=".binding.", suffix=".tmp")
+        with os.fdopen(fd, "w") as f:
+            os.fchmod(f.fileno(), 0o600)
+            f.write(fresh.hex() + "\n")
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            key = _read_key(path)
+            if key:
+                return key
+            os.replace(tmp, path)  # present but unusable
+            tmp = None
+        return fresh
+    except OSError:
+        return fresh
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def url_hash(url, key: bytes) -> str | None:
+    """What a profile remembers of a remote: a keyed hash of the raw string, never the string."""
     if not isinstance(url, str) or not url.strip():
         return None
-    return hashlib.sha256(url.strip().encode("utf-8", "surrogateescape")).hexdigest()[:24]
+    return hmac.new(key, b"url\0" + url.strip().encode("utf-8", "surrogateescape"), hashlib.sha256).hexdigest()[:24]
 
 
 def redact_remote(url: str | None) -> str | None:
@@ -240,6 +301,7 @@ def svn_root(cwd: Path) -> Path | None:
 
 
 BOUND_REMOTE = "origin"
+BOUND_FIELDS = ("root", "origin_hash", "push_hash", "config_hash")
 
 
 def push_remote(root: Path) -> str:
@@ -255,14 +317,51 @@ def push_remote(root: Path) -> str:
     return "origin"
 
 
-def identify(cwd: Path | None = None) -> dict:
-    """vcs type, root, raw origin URL, push URL and the profile key for the project at cwd.
+# git settings other than the URLs (hashed on their own, after insteadOf) that decide where a push to `origin` goes or what carries it:
+# every `remote.origin.*` but the URLs, refspecs and fetch housekeeping (those change in normal use), the
+# helper and proxy settings, `http.*` (proxy, TLS verification, extra headers), `push.*` and
+# submodule recursion. Hashed, never stored or shown.
+PUSH_CONFIG = re.compile(
+    rf"^(remote\.{BOUND_REMOTE}\.(?!(url|pushurl|fetch|push|tagopt|prune|prunetags|promisor|partialclonefilter)$)|"
+    r"http\.|push\.|submodule\.recurse$|submodule\..*\.url$|core\.(sshcommand|gitproxy)$)", re.I)
+
+
+def push_config(root: Path) -> str | None:
+    """A canonical (sorted) text of the settings in PUSH_CONFIG from every config scope, or None when
+    git can't be asked. Only ever hashed."""
+    out = git(["config", "--list", "-z"], root)
+    if out is None:
+        return None
+    entries = []
+    for item in out.split("\0"):
+        key, _, value = item.partition("\n")
+        if key and PUSH_CONFIG.match(key):
+            entries.append(f"{key.lower()}={value}")
+    return "\n".join(sorted(entries))
+
+
+def keyed(ident: dict, data: Path | None, create: bool = False) -> dict:
+    """`ident` with the keyed hashes of what it found (`bind`): raw origin URLs, push URLs and
+    the push-relevant git settings. Without `data` the key is a throwaway, so nothing matches."""
+    key = binding_key(data, create)
+    cfg = ident.get("config_all")
+    ident["bind"] = {
+        "origin_hash": url_hash(ident.get("origin_all") or ident.get("remote"), key),
+        "push_hash": url_hash(ident.get("push_all"), key),
+        "config_hash": hmac.new(key, b"config\0" + cfg.encode("utf-8", "surrogateescape"), hashlib.sha256)
+        .hexdigest()[:24] if cfg is not None else None}
+    return ident
+
+
+def identify(cwd: Path | None = None, data: Path | None = None) -> dict:
+    """vcs type, root, raw origin URL, push URL and the profile key for the project at cwd, plus the
+    keyed hashes (`bind`) a profile records. `data` is the plugin data dir that holds the hash key.
 
     The key comes from git config, which anything in the repo can change, so it only finds a
     profile; `checkout_mismatch` decides whether that profile's `auto` settings still apply here."""
     cwd = Path(os.path.realpath(cwd or Path.cwd()))
     top = git(["rev-parse", "--show-toplevel"], cwd)
-    origin_all = push_all = None
+    origin_all = push_all = config_all = None
     push_ok = False
     if top:
         root = Path(os.path.realpath(top))
@@ -270,6 +369,7 @@ def identify(cwd: Path | None = None) -> dict:
         # order, with insteadOf/pushInsteadOf applied. git pushes to all of the push URLs.
         origin_all = git(["remote", "get-url", "--all", BOUND_REMOTE], root) or None
         push_all = git(["remote", "get-url", "--push", "--all", BOUND_REMOTE], root) or None
+        config_all = push_config(root)
         remote = origin_all.splitlines()[0] if origin_all else git(["config", "--get", f"remote.{BOUND_REMOTE}.url"], root)
         # `release.push: auto` is only in effect when a plain `git push` goes to the bound remote
         push_ok = bool(push_all) and push_remote(root) == BOUND_REMOTE
@@ -281,8 +381,9 @@ def identify(cwd: Path | None = None) -> dict:
         if vcs == "svn" and shutil.which("svn"):
             remote = run(["svn", "info", "--non-interactive", "--show-item", "repos-root-url"], root) or None
     basis = "remote:" + normalize_remote(remote) if remote else "root:" + str(root)
-    return {"vcs": vcs, "root": str(root), "remote": remote, "origin_all": origin_all, "push_all": push_all,
-            "push_ok": push_ok, "key": hashlib.sha256(basis.encode()).hexdigest()[:16]}
+    return keyed({"vcs": vcs, "root": str(root), "remote": remote, "origin_all": origin_all, "push_all": push_all,
+                  "config_all": config_all, "push_ok": push_ok,
+                  "key": hashlib.sha256(basis.encode()).hexdigest()[:16]}, data)
 
 
 # ---------------------------------------------------------------- detection
@@ -476,9 +577,9 @@ def save(path: Path, prof: dict, data: Path) -> None:
 
 
 def binding(ident: dict) -> dict:
-    """Where this profile was set up: the checkout and hashes of the raw origin and push URLs."""
-    return {"root": ident["root"], "origin_hash": url_hash(ident.get("origin_all") or ident.get("remote")),
-            "push_hash": url_hash(ident.get("push_all")), "key": ident["key"]}
+    """Where this profile was set up: the checkout and keyed hashes of the raw origin and push URLs and of
+    the git settings that decide where a push goes."""
+    return {"root": ident["root"], **ident["bind"], "key": ident["key"]}
 
 
 def stamp(prof: dict, ident: dict, rebind: bool = False) -> dict:
@@ -511,11 +612,10 @@ def checkout_mismatch(prof: dict, ident: dict) -> bool:
     if not prof:
         return False
     proj = prof.get("project")
-    if not isinstance(proj, dict) or any(k not in proj for k in ("root", "origin_hash", "push_hash")):
+    if not isinstance(proj, dict) or any(k not in proj for k in BOUND_FIELDS):
         return True
     now = binding(ident)
-    return (proj["root"] != now["root"] or proj["origin_hash"] != now["origin_hash"]
-            or proj["push_hash"] != now["push_hash"])
+    return any(proj[k] != now[k] for k in BOUND_FIELDS)
 
 
 def push_not_in_effect(prof: dict, ident: dict) -> bool:
@@ -557,7 +657,7 @@ def adopt(prof: dict, ident: dict) -> tuple[dict, list[str]]:
 def moved(prof: dict, ident: dict) -> str | None:
     """Why the profile is stale, in words of our own: nothing here comes from the repository."""
     proj = prof.get("project")
-    if not isinstance(proj, dict) or any(k not in proj for k in ("root", "origin_hash", "push_hash")):
+    if not isinstance(proj, dict) or any(k not in proj for k in BOUND_FIELDS):
         return "profile has no usable checkout record (older format); run `git remote get-url --push --all origin`"
     parts = []
     now = binding(ident)
@@ -565,6 +665,8 @@ def moved(prof: dict, ident: dict) -> str | None:
         parts.append("push URLs changed since you confirmed (see `git remote get-url --push --all origin`)")
     if proj["origin_hash"] != now["origin_hash"]:
         parts.append("origin URLs changed since you confirmed (see `git remote get-url --all origin`)")
+    if proj["config_hash"] != now["config_hash"]:
+        parts.append("git settings that decide where a push goes changed")
     if proj["root"] != ident["root"]:
         parts.append("checkout moved (profile was confirmed at another path)")
     return "; ".join(parts) or None
@@ -791,7 +893,7 @@ def brief(prof: dict, path: Path, ident: dict | None = None) -> list[str]:
 def snapshot(raw_data: str | None, cwd: Path | None = None) -> tuple[list[str], list[str], Path]:
     """(brief lines, missing facts, profile path) for discover.py. Raises UsageError on a bad --data."""
     data = data_dir(raw_data)
-    ident = identify(cwd)
+    ident = identify(cwd, data)
     path = profile_path(data, ident)
     prof = load(path)
     return brief(prof, path, ident), missing(prof, ident), path
@@ -801,7 +903,7 @@ def load_for(raw_data: str | None, cwd: Path | None = None) -> tuple[dict, Path,
     """(effective profile, path, file bytes, stale) for etk_run: what may be acted on here.
     `stale` means the profile was set up for another checkout/remote and its `auto`s were dropped."""
     data = data_dir(raw_data)
-    ident = identify(cwd)
+    ident = identify(cwd, data)
     path = profile_path(data, ident)
     raw = read_bytes(path)
     try:  # parse the bytes that get hashed, not a second read
@@ -876,6 +978,7 @@ def main(argv: list[str] | None = None) -> int:
         root = Path(ident["root"])
         if ident["vcs"] != "none" and (data == root or root in data.parents):
             raise UsageError(f"--data {data} is inside the repository; the profile must live outside it")
+        ident = keyed(ident, data, create=a.cmd in {"set", "unset", "confirm", "remember"})
         path = profile_path(data, ident)
         if a.cmd == "path":
             print(path)

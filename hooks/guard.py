@@ -538,7 +538,7 @@ def check_checkout(rest: list[str], cwd: str) -> None:
 # Config that decides where a push goes or which programs git runs. A subagent changing it could
 # redirect the Lead's next push (or select another developer's workflow profile), so only reads pass.
 GIT_CONFIG_GUARDED = re.compile(r"^((remote|url|filter|diff|credential|include|includeif|branch|alias|pager|"
-                                r"sequence|gpg|merge)(\.|$)|core\.(hookspath|sshcommand|fsmonitor|pager|"
+                                r"sequence|gpg|merge|http|submodule)(\.|$)|core\.(hookspath|sshcommand|fsmonitor|pager|"
                                 r"editor|askpass|gitproxy|attributesfile|excludesfile|worktree)$|"
                                 r"commit\.gpgsign$|push\.)", re.I)
 GIT_CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool",

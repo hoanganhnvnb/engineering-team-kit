@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -77,6 +78,10 @@ class Base(unittest.TestCase):
     def detect(self, cwd: Path) -> dict:
         return json.loads(self.ok(cwd, "detect"))
 
+    def hashed(self, url) -> str | None:
+        """url_hash under this test's data dir key (it exists once the profile was first saved)."""
+        return etk_profile.url_hash(url, etk_profile.binding_key(self.data))
+
 
 class IdentityTests(Base):
     def test_ssh_and_https_clones_share_a_key(self):
@@ -132,7 +137,7 @@ class IdentityTests(Base):
         self.ok(d, "set", "commit.style", "conventional")
         stored = json.loads(Path(self.ok(d, "path").strip()).read_text())
         self.assertEqual(self.detect(d)["remote"], "https://github.com/o/r.git")
-        self.assertEqual(stored["project"]["origin_hash"], etk_profile.url_hash("https://alice:s3cr3t@github.com/o/r.git"))
+        self.assertEqual(stored["project"]["origin_hash"], self.hashed("https://alice:s3cr3t@github.com/o/r.git"))
         self.assertNotIn("remote", stored["project"])  # no URL text in the profile, only hashes
         self.assertNotIn("s3cr3t", json.dumps(stored))
 
@@ -239,6 +244,9 @@ class DetectTests(Base):
         d = self.repo()
         self.detect(d)
         self.assertEqual(list(self.data.iterdir()), [])
+        for args in (("path",), ("show",), ("show", "--brief"), ("missing",)):
+            self.prof(d, *args)
+        self.assertEqual(list(self.data.iterdir()), [])  # reading never creates the binding key
 
 
 class StoreTests(Base):
@@ -452,7 +460,7 @@ class StoreTests(Base):
         self.ok(d, "confirm")
         stored = json.loads(self.ok(d, "show", "--json"))["project"]
         self.assertEqual((stored["root"], stored["push_hash"]),
-                         (str(d), etk_profile.url_hash("https://github.com/victim/prod.git")))
+                         (str(d), self.hashed("https://github.com/victim/prod.git")))
         self.assertEqual(self.ok(d, "missing"), "")
         self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
         # repository code redirects the push: the stored `auto` values stop counting
@@ -475,7 +483,7 @@ class StoreTests(Base):
         self.ok(d, "confirm")
         self.assertEqual(self.ok(d, "missing"), "")
         stored = json.loads(self.ok(d, "show", "--json"))["project"]
-        self.assertEqual(stored["push_hash"], etk_profile.url_hash("https://user:pw@evil.example/x.git?token=SECRET"))
+        self.assertEqual(stored["push_hash"], self.hashed("https://user:pw@evil.example/x.git?token=SECRET"))
         # another checkout that claims the same origin finds the same file but not its `auto`s
         other = self.repo("other", "git@github.com:victim/prod.git")
         self.assertEqual(self.ok(other, "path"), self.ok(d, "path"))
@@ -497,7 +505,7 @@ class StoreTests(Base):
             with self.subTest(bound=bound[:60]):
                 d = self.repo(f"p{n}", "https://github.com/o/r.git")
                 if "\x00" in bound:  # git can't hold a NUL; the hash helper must still not raise on it
-                    self.assertIsNotNone(etk_profile.url_hash(bound))
+                    self.assertIsNotNone(self.hashed(bound))
                     continue
                 self.git(d, "config", "remote.origin.pushurl", bound)
                 self.ok(d, "set", "release.push", "auto")
@@ -621,7 +629,7 @@ class StoreTests(Base):
         self.assertIn("older format", self.ok(d, "show", "--brief"))
         self.assertIn("dropped release.push=auto", self.ok(d, "set", "release.commit", "auto"))
         stored = json.loads(path.read_text())
-        self.assertEqual(sorted(stored["project"]), ["key", "origin_hash", "push_hash", "root"])
+        self.assertEqual(sorted(stored["project"]), ["config_hash", "key", "origin_hash", "push_hash", "root"])
 
     def test_same_checkout_keeps_auto_values_and_confirmed_state(self):
         d = self.repo(remote="https://github.com/o/r.git")
@@ -878,26 +886,251 @@ class StoreTests(Base):
         self.git(d, "config", "--unset", "url.https://evil.example/.insteadOf")  # the redirect disappears
         self.assertEqual(self.authorize(d, run, "push").returncode, 2)
 
-    def test_act_push_rechecks_the_binding_the_profile_authorized(self):
-        remote = "https://github.com/victim/prod.git"
-        d = self.repo("act", remote)
+    def etk_run(self, cwd, *args):
+        return subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), *args], cwd=cwd, env=self.env,
+                              capture_output=True, text=True, timeout=60)
+
+    def ship_ready(self, d, remote="https://github.com/victim/prod.git"):
+        """A confirmed profile with push auto, a ship run whose gates pass, and a profile push authorization."""
         self.ok(d, "set", "release.push", "auto")
         self.ok(d, "set", "release.commit", "auto")
         self.ok(d, "confirm")
         run = self.open_run(d)
+        led = json.loads((Path(run) / "gates.json").read_text())
+        led["acceptance_criteria"] = [{"id": "AC-1", "text": "it works", "status": "met"}]
+        for g in led["gates"]:
+            led["gates"][g] = {"status": "PASS", "evidence": "checked carefully with evidence", "commands": []}
+        for g in ("G3", "G4"):
+            led["gates"][g]["commands"] = [{"cmd": "t", "exit_code": 0, "type": "test", "recorded_by": "exec"}]
+        led["gates"]["G4"]["commands"].append({"cmd": "r", "exit_code": 0, "type": "runtime", "recorded_by": "exec"})
+        led["gates"]["G7"] = {"status": "NOT_RUN", "evidence": "", "commands": []}
+        (Path(run) / "gates.json").write_text(json.dumps(led))
         self.assertEqual(self.authorize(d, run, "push").returncode, 0)
+        return run
 
-        def act():
-            return subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), "act", "--action", "push",
-                                   "--ref", "x", "--exit", "0", "--force-record" if False else "--target", "origin", run],
-                                  cwd=d, env=self.env, capture_output=True, text=True, timeout=60)
+    def preflight(self, d, run, action="push"):
+        return self.etk_run(d, "preflight", "--action", action, "--data", str(self.data), run)
+
+    def act(self, d, run, *extra, data=True):
+        return self.etk_run(d, "act", "--action", "push", "--ref", "x", "--exit", "0",
+                            *(["--data", str(self.data)] if data else []), *extra, run)
+
+    def test_act_push_rechecks_the_binding_the_profile_authorized(self):
+        d = self.repo("act", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
         self.git(d, "config", "--add", "remote.origin.pushurl", "https://evil.example/x.git")
-        r = act()
+        r = self.act(d, run)
         self.assertEqual(r.returncode, 2, r.stdout)
         self.assertIn("changed since the profile authorized it", r.stderr)
         self.assertNotIn("evil", r.stderr + r.stdout)
         self.git(d, "config", "--unset-all", "remote.origin.pushurl")
-        self.assertNotIn("changed since the profile authorized it", act().stderr)
+        self.assertEqual(self.act(d, run).returncode, 0)
+        self.assertIs(json.loads((Path(run) / "gates.json").read_text())["actions"][0]["binding_ok"], True)
+
+    def test_act_needs_data_to_recheck_a_profile_authorized_push(self):
+        d = self.repo("nodata", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        r = self.act(d, run, data=False)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--data", r.stderr)
+
+    def test_preflight_refuses_a_push_the_binding_no_longer_allows(self):
+        remote = "https://github.com/victim/prod.git"
+        d = self.repo("pre", remote)
+        run = self.ship_ready(d)
+        for action in ("push", "pr"):
+            self.assertEqual(self.etk_run(d, "authorize", "--action", action, "--source", "profile", "--data",
+                                          str(self.data), run).returncode, 0 if action == "push" else 2)
+        r = self.preflight(d, run)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("PREFLIGHT OK", r.stdout)
+        # a test run by `etk exec` adds a second push URL after the authorization was recorded
+        self.git(d, "config", "--add", "remote.origin.pushurl", "https://evil.example/x.git")
+        r = self.preflight(d, run)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("changed since the profile authorized it", r.stdout)
+        self.assertNotIn("evil", r.stdout + r.stderr)
+        self.assertEqual(self.preflight(d, run, "pr").returncode, 1)  # nothing authorized a PR, but the push check
+        self.git(d, "config", "--unset-all", "remote.origin.pushurl")
+        self.assertEqual(self.preflight(d, run).returncode, 0)
+        # a plain push that goes to another remote
+        self.git(d, "remote", "add", "decoy", remote)
+        self.git(d, "config", "remote.pushDefault", "decoy")
+        r = self.preflight(d, run)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no longer goes to origin", r.stdout)
+        self.git(d, "config", "--unset", "remote.pushDefault")
+        # the gates still count: preflight includes `ready`
+        led = json.loads((Path(run) / "gates.json").read_text())
+        led["gates"]["G3"]["status"] = "FAIL"
+        (Path(run) / "gates.json").write_text(json.dumps(led))
+        self.assertEqual(self.preflight(d, run).returncode, 1)
+        self.assertEqual(self.preflight(d, run, "pr").returncode, 1)
+        self.assertEqual(self.etk_run(d, "preflight", "--action", "push", run).returncode, 1)  # no --data
+
+    def test_preflight_needs_no_profile_when_the_user_authorized_the_push(self):
+        d = self.repo("words", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        self.etk_run(d, "authorize", "--action", "push", "--source", "prompt", "--quote", "push it when green", run)
+        self.git(d, "config", "--add", "remote.origin.pushurl", "https://evil.example/x.git")
+        self.assertEqual(self.etk_run(d, "preflight", "--action", "push", run).returncode, 0)
+
+    def test_force_record_of_a_moved_binding_fails_check(self):
+        d = self.repo("force", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        self.assertEqual(self.etk_run(d, "check", run).returncode, 0)
+        self.git(d, "config", "--add", "remote.origin.pushurl", "https://evil.example/x.git")
+        self.assertEqual(self.act(d, run).returncode, 2)
+        r = self.act(d, run, "--force-record")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("binding had moved", r.stdout)
+        self.assertIs(json.loads((Path(run) / "gates.json").read_text())["actions"][0]["binding_ok"], False)
+        r = self.etk_run(d, "check", run)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("binding had moved", r.stdout + r.stderr)
+        self.assertNotIn("evil", r.stdout + r.stderr)
+
+    def test_force_record_without_a_moved_binding_is_clean(self):
+        d = self.repo("forceok", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        self.assertEqual(self.act(d, run, "--force-record").returncode, 0)
+        self.assertIs(json.loads((Path(run) / "gates.json").read_text())["actions"][0]["binding_ok"], True)
+        self.assertEqual(self.etk_run(d, "check", run).returncode, 0)
+
+    def test_authorize_records_the_hashes_of_the_stored_profile(self):
+        d = self.repo("rec", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        stored = json.loads(self.ok(d, "show", "--json"))["project"]
+        au = json.loads((Path(run) / "gates.json").read_text())["authorizations"][0]["binding"]
+        self.assertEqual(au, {k: stored[k] for k in etk_profile.BOUND_FIELDS})
+
+    PUSH_SETTINGS = (("remote.origin.receivepack", "/tmp/x"), ("remote.origin.vcs", "ext"),
+                     ("remote.origin.proxy", "http://p.example:3128"), ("remote.origin.mirror", "true"),
+                     ("core.sshCommand", "ssh -o ProxyCommand=x"), ("http.proxy", "http://p.example:3128"),
+                     ("http.https://github.com/.proxy", "http://p.example:3128"), ("http.sslVerify", "false"),
+                     ("http.extraHeader", "X: y"), ("push.recurseSubmodules", "on-demand"),
+                     ("submodule.recurse", "true"), ("push.default", "matching"))
+
+    def test_settings_that_redirect_a_push_make_the_profile_stale(self):
+        remote = "https://github.com/victim/prod.git"
+        for n, (key, value) in enumerate(self.PUSH_SETTINGS):
+            with self.subTest(key=key):
+                d = self.repo(f"s{n}", remote)
+                run = self.ship_ready(d)
+                self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+                self.git(d, "config", key, value)
+                lines = self.ok(d, "show", "--brief").splitlines()
+                self.assertEqual(lines[0], etk_profile.RECONFIRM)
+                self.assertEqual(lines[1], "git settings that decide where a push goes changed")
+                self.assertNotIn(value, "\n".join(lines))
+                r = self.authorize(d, self.open_run(d), "push")
+                self.assertEqual(r.returncode, 2)
+                self.assertEqual(self.preflight(d, run).returncode, 1)
+                self.git(d, "config", "--unset", key)
+                self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+
+    def test_normal_git_use_does_not_make_the_profile_stale(self):
+        d = self.repo("normal", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        self.git(d, "commit", "-q", "--allow-empty", "-m", "more")
+        self.git(d, "checkout", "-q", "-b", "feat/x")
+        self.git(d, "config", "branch.feat/x.remote", "origin")
+        self.git(d, "config", "branch.feat/x.merge", "refs/heads/feat/x")
+        self.git(d, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+        self.git(d, "config", "remote.origin.tagopt", "--no-tags")
+        self.git(d, "config", "remote.origin.push", "refs/heads/feat/x")
+        self.git(d, "config", "user.name", "someone")
+        self.git(d, "config", "core.autocrlf", "false")
+        self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+        self.assertEqual(self.authorize(d, self.open_run(d), "push").returncode, 0)
+        self.assertEqual(self.preflight(d, run).returncode, 0)
+
+    def key_path(self):
+        return self.data / etk_profile.KEY_FILE
+
+    def test_binding_hashes_are_keyed_per_data_dir(self):
+        remote = "https://alice:s3cr3t@github.com/victim/prod.git"
+        d = self.repo("keyed", remote)
+        self.ok(d, "set", "release.push", "auto")
+        self.ok(d, "confirm")
+        self.assertEqual(stat.S_IMODE(os.stat(self.key_path()).st_mode), 0o600)
+        key = self.key_path().read_text()
+        stored = json.loads(self.ok(d, "show", "--json"))["project"]
+        other = self.tmp / "plugins" / "data" / "other"
+        other.mkdir(parents=True)
+        self.assertNotEqual(stored["origin_hash"], etk_profile.url_hash(remote, etk_profile.binding_key(other, True)))
+        self.assertEqual(stored["origin_hash"], etk_profile.url_hash(remote, etk_profile.binding_key(self.data)))
+        self.assertNotEqual(etk_profile.binding_key(other), etk_profile.binding_key(self.data))
+        self.assertEqual(stat.S_IMODE(os.stat(other / etk_profile.KEY_FILE).st_mode), 0o600)
+        for args in (("show",), ("show", "--json"), ("detect",), ("show", "--brief")):
+            out = self.ok(d, *args)
+            self.assertNotIn(key.strip(), out)
+            self.assertNotIn("s3cr3t", out)
+
+    def test_a_lost_or_unusable_binding_key_makes_the_profile_stale(self):
+        for damage in ("delete", "garbage", "loose", "link"):
+            with self.subTest(damage=damage):
+                d = self.repo(f"lost-{damage}", "https://github.com/victim/prod.git")
+                run = self.ship_ready(d)
+                old = self.key_path().read_text()
+                if damage == "delete":
+                    self.key_path().unlink()
+                elif damage == "garbage":
+                    self.key_path().write_text("not hex")
+                elif damage == "loose":
+                    os.chmod(self.key_path(), 0o644)
+                else:
+                    target = self.tmp / f"elsewhere-{damage}.key"
+                    target.write_text(old)
+                    os.chmod(target, 0o600)
+                    self.key_path().unlink()
+                    self.key_path().symlink_to(target)
+                self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+                self.assertEqual(self.authorize(d, self.open_run(d), "push").returncode, 2)
+                self.assertEqual(self.preflight(d, run).returncode, 1)
+                self.assertEqual(self.etk_run(d, "act", "--action", "push", "--exit", "0", "--data", str(self.data),
+                                              run).returncode, 2)
+                # answering again here saves with a new key; only then does `auto` count
+                self.ok(d, "set", "release.push", "auto")
+                self.ok(d, "confirm")
+                key = self.key_path()
+                self.assertFalse(key.is_symlink())
+                self.assertEqual(stat.S_IMODE(os.stat(key).st_mode), 0o600)
+                self.assertNotEqual(key.read_text(), old)
+                self.assertEqual(self.authorize(d, self.open_run(d), "push").returncode, 0)
+
+    def test_concurrent_first_use_ends_with_one_key(self):
+        keys = set()
+        script = ("import sys; sys.path.insert(0, sys.argv[1]); import etk_profile; from pathlib import Path; "
+                  "print(etk_profile.binding_key(Path(sys.argv[2]), True).hex())")
+        procs = [subprocess.Popen([sys.executable, "-c", script, str(ROOT / "scripts"), str(self.data)],
+                                  stdout=subprocess.PIPE, text=True) for _ in range(8)]
+        for p in procs:
+            keys.add(p.communicate(timeout=60)[0].strip())
+        self.assertEqual(len(keys), 1)
+        self.assertEqual(keys.pop(), self.key_path().read_text().strip())
+        self.assertEqual(sorted(x.name for x in self.data.iterdir()), [etk_profile.KEY_FILE])
+
+    def test_an_unwritable_data_dir_gives_a_throwaway_key_that_matches_nothing(self):
+        gone = self.tmp / "plugins" / "data" / "nodir" / "f"
+        (gone.parent).mkdir()
+        (gone.parent / "f").write_text("a file where the dir should be")  # makedirs fails
+        self.assertNotEqual(etk_profile.binding_key(gone / "x", True), etk_profile.binding_key(gone / "x", True))
+        self.assertFalse((gone / "x").exists())
+
+    def test_garbage_stored_binding_never_raises(self):
+        d = self.repo("garb", "https://github.com/victim/prod.git")
+        self.ok(d, "set", "release.push", "auto")
+        self.ok(d, "confirm")
+        path = Path(self.ok(d, "path").strip())
+        for junk in ({"project": {"root": 1, "origin_hash": {}, "push_hash": [], "config_hash": None}},
+                     {"project": {"root": "x"}}, {"project": "x"}, ["x"]):
+            path.write_text(json.dumps(junk))
+            r = self.prof(d, "show", "--brief")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+        path.write_text("{not json")
+        self.assertEqual(self.prof(d, "show", "--brief").returncode, 0)
 
     def test_local_path_origins_and_parsed_remotes_have_different_keys(self):
         local = self.repo("loc", "github.com/o/r")
