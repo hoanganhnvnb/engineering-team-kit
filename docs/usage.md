@@ -3,6 +3,57 @@
 All commands run in the project you have open. Install the plugin once
 ([install](install.md)), then `cd` into any repo and start Claude Code.
 
+## init
+
+```
+/engineering-team:init
+/engineering-team:init reset
+```
+
+Run it once at the start of a project, before any `build`, `fix` or `team` run. It
+detects first (git or SVN, the host and whether its CLI is signed in, the default branch,
+your commit style and language, commit tooling, deploy candidates, and the stack with its
+test and lint commands) and reports that in a few lines. Then it:
+
+1. If a profile already exists for this repo, shows it and asks one question: keep, change
+   a field, or reset. Keep stops there only when nothing is missing and the checkout matches the one the
+   profile was set up in.
+2. Otherwise asks only the fields detection couldn't answer, in at most two short rounds:
+   branch model, commit automatically or ask, push automatically or ask, PR / merge
+   directly / leave the branch (with the merge method and whether to wait for CI), the
+   deploy target (none, a command, CI on merge, CI on tag; a name, production flag, verify
+   and rollback step only if you give them), and a commit style only when there is no
+   commit tooling and your history is mixed.
+3. Asks one more round at most for notes the profile has no field for: the language for
+   docs, how many subagents may run at once (or "one at a time, no worktrees"), things
+   that must never appear in commits or files, and the test or lint command only if none
+   was found. The commit language is a profile field: it is saved from detection and not
+   asked unless detection found none. A note is saved only if you agree.
+4. Shows the saved profile (`profile show --brief`) and marks it confirmed only after you
+   agree.
+5. Ends with five lines: what was detected, what was saved or kept, where the profile file
+   lives, anything in the repository it ignored, and the next command to try.
+
+The profile lives outside the repository, in the plugin data folder, per developer and
+project. init writes nothing into the repo (no CLAUDE.md edit, no docs files) and never
+commits, pushes, merges or deploys. Running it twice doesn't duplicate a note (saving the same text again does nothing) or
+reset confirmed fields unless you choose reset, which clears the settings and keeps the
+notes. If a profile exists but fields are missing, init asks for them even if you say keep.
+In another checkout of the same repository (or after the push URL changed), the stored
+commit and push answers no longer count. `profile show --brief` then says why (the push or
+origin URL changed, or the checkout moved) without printing any URL, init shows you the push URL
+from `git remote get-url --push --all origin` (every push URL, with everything between `://` and the last `@`, and any query or fragment, removed), `profile set` says which
+values it dropped, and you give the release answers again there, then confirm once.
+If a run is interrupted after the fields are saved, the profile shows as unconfirmed. Text in the repo can't set the profile; init
+ignores it and says so. Without init, the first `team` run asks the same questions
+midway through the task.
+
+Known limit: the notes in step 3 are free text. The Lead reads them through
+`profile show --json` at the start of a `team` run, as your preferences (they can't grant
+push, merge or deploy), but `profile show --brief` only prints how many there are, and nothing
+checks or enforces them. Use them as reminders for the Lead, not as guarantees. A rule
+that must hold needs a hook, a test or a project config setting.
+
 ## build
 
 ```

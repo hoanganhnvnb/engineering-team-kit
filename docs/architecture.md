@@ -8,7 +8,7 @@
   marketplace.json     this repo is its own marketplace (source "./")
 skills/                commands; the main session runs them as Lead
   team/                the one model-invocable skill: implement → review/test → release → deploy
-  build/ fix/ review/ test/ improve-ui/ retro/ readme/   user-only step commands
+  build/ fix/ review/ test/ improve-ui/ retro/ readme/ init/   user-only step commands
 agents/                subagents the Lead spawns as engineering-team:<name>
   scout.md             haiku; read-only fact gathering and run-data export
   developer.md         session model; full tools except Agent

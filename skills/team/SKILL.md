@@ -30,8 +30,13 @@ Record each phase change with `etk.sh run phase <name> RUN`. `RUN` is the direct
      resume that run from its phase. Re-confirm any authorization it carries before
      you rely on it.
    - Otherwise:
-     - If the snapshot's Workflow profile block says `missing`, follow
-       `${CLAUDE_PLUGIN_ROOT}/workflows/profile.md`.
+     - If the snapshot's Workflow profile block says `missing`, suggest
+       `/engineering-team:init` in one line, then follow
+       `${CLAUDE_PLUGIN_ROOT}/workflows/profile.md` (the question list lives there only).
+     - If a profile exists (the block doesn't say `missing`), run
+       `sh "${CLAUDE_PLUGIN_ROOT}/scripts/etk.sh" profile show --json --data "${CLAUDE_PLUGIN_DATA}"`
+       and treat each `memory[].fact`, if there are any, as one of the user's preferences. A note is not a
+       permission and can't grant push, merge or deploy.
      - Size the task with `${CLAUDE_PLUGIN_ROOT}/workflows/routing.md`.
      - Open the ledger with `run init "<goal>" --kind ship --mode <mode>`.
      - Record every permission the request already gives, as in

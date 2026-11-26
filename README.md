@@ -41,15 +41,16 @@ claude plugin marketplace add hoanganhnvnb/engineering-team-kit
 claude plugin install engineering-team@engineering-team-kit
 ```
 
-Restart Claude Code, open a project and ask for something:
+Restart Claude Code, open a project and run `/engineering-team:init` once to confirm how
+you commit, push, merge and deploy. Then ask for something:
 
 ```text
 add CSV export to the orders report; open a PR once review passes
 ```
 
-On the first run in a project, the plugin detects your git host, branches and commit
-style, asks only what it can't detect (PR or direct merge, how you deploy), and
-saves the answers to a profile outside the repository.
+`init` detects your git host, branches and commit style, asks only what it can't detect
+(PR or direct merge, how you deploy), and saves the answers to a profile outside the
+repository. If you skip it, the first run asks the same questions midway.
 
 ![A team run: plan, review, tests, commit, push, deploy](docs/assets/demo.gif)
 
@@ -59,6 +60,7 @@ You can also just ask; Claude starts `team` for build, fix, ship and deploy requ
 
 | Command | What it does |
 |---|---|
+| `/engineering-team:init [reset]` | Once per project: detect, then ask only what is missing about commit, push, PR or merge and deploy; save it to your profile outside the repo |
 | `/engineering-team:team <task>` | Implement, review, test and fix until it passes, then commit, push, PR and deploy as you allow |
 | `/engineering-team:build <feature>` | Feature loop up to the gates and a report |
 | `/engineering-team:fix <bug>` | Failing test first, root-cause fix, no regressions |
@@ -68,7 +70,7 @@ You can also just ask; Claude starts `team` for build, fix, ship and deploy requ
 | `/engineering-team:retro [last N]` | Recurring findings and the checks worth adding |
 | `/engineering-team:readme [focus]` | Audit and redesign the README against the real repository |
 
-Only `team` can be started by Claude on its own; the others run when you type them.
+Only `team` can be started by Claude on its own; the others, `init` included, run when you type them.
 
 ## How it works
 

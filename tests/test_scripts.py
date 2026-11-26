@@ -897,12 +897,30 @@ class EvalRunTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("exits 0 whatever", r.stderr)
 
-    def test_fails_when_a_skill_was_not_rewritten(self):
-        root, env = self.mini_repo("---\nname: one\n---\nno snapshot line here\n")
+    def test_fails_when_a_snapshot_line_cannot_be_rewritten(self):
+        root, env = self.mini_repo("---\nname: one\n---\n!`some other command`\n")
         r = self.run_script(root, env)
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("rewrote the snapshot line in 0 of 1 skills", r.stderr)
+        self.assertIn("a snapshot line was left in one", r.stderr)
         self.assertNotIn("claude plugin eval", r.stdout)
+
+    def test_fails_on_an_inline_expansion_but_not_one_inside_a_code_fence(self):
+        root, env = self.mini_repo("---\nname: one\n---\nsee !`git log` here\n")
+        r = self.run_script(root, env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("a snapshot line was left in one", r.stderr)
+        root, env = self.mini_repo(f"---\nname: one\n---\n{self.SNAPSHOT}\n\n```\n!`git log`\n```\n")
+        r = self.run_script(root, env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_patches_a_snapshot_line_with_data_and_skips_skills_without_one(self):
+        data = self.SNAPSHOT[:-1] + ' --data "${CLAUDE_PLUGIN_DATA}"`'
+        root, env = self.mini_repo(f"---\nname: one\n---\n{data}\n")
+        (root / "skills" / "two").mkdir()
+        (root / "skills" / "two" / "SKILL.md").write_text("---\nname: two\n---\nno snapshot line here\n")
+        r = self.run_script(root, env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("claude plugin eval", r.stdout)
 
 
 class LauncherPythonTests(unittest.TestCase):

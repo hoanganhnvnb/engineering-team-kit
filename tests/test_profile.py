@@ -386,6 +386,14 @@ class StoreTests(Base):
         self.ok(d, "set", "deploy.none", "true")
         self.assertIn("deploy: none", self.ok(d, "show", "--brief"))
 
+    def test_mixed_history_is_reported_as_project_style_not_a_finding(self):
+        """`init` asks the style on `project` instead of saving it: detect guesses, it doesn't know."""
+        d = self.repo(subjects=("feat: a", "Update readme", "wip", "fix stuff", "Merge branch x"))
+        facts = self.detect(d)
+        self.assertEqual(facts["commit_style"], "project")
+        self.assertEqual(facts["commit_tools"], [])
+        self.assertIn("commit.style", self.ok(d, "missing").split())
+
     def test_remember_ignores_an_exact_duplicate(self):
         d = self.repo()
         self.ok(d, "remember", "run one subagent at a time")
@@ -407,6 +415,33 @@ class StoreTests(Base):
         self.assertFalse(self.ok(d, "show", "--brief").strip().endswith("(unconfirmed)"))
         self.ok(d, "set", "release.push", "auto")
         self.assertTrue(self.ok(d, "show", "--brief").strip().endswith("(unconfirmed)"))
+
+    def test_init_flow_keep_and_reset(self):
+        """The command sequence `/engineering-team:init` runs: set, remember, confirm, then keep or reset."""
+        d = self.repo(remote="git@github.com:o/r.git", subjects=("feat: a", "fix: b"))
+        answers = (("vcs.type", "git"), ("branches.model", "feature"), ("release.commit", "auto"),
+                   ("release.push", "confirm"), ("release.integrate", "pr"), ("commit.style", "conventional"),
+                   ("deploy.none", "true"))
+        for path, value in answers:
+            self.ok(d, "set", path, value)
+        self.ok(d, "remember", "run one subagent at a time")
+        self.ok(d, "confirm")
+        before = json.loads(self.ok(d, "show", "--json"))
+        # keep: nothing is missing, and running the saves again leaves the file as it was
+        self.assertEqual(self.ok(d, "missing"), "")
+        self.ok(d, "remember", "run one subagent at a time")
+        self.assertEqual(json.loads(self.ok(d, "show", "--json")), before)
+        self.assertFalse(self.ok(d, "show", "--brief").strip().endswith("(unconfirmed)"))
+        # reset: the fields init re-asks come back, the note stays, and the file says unconfirmed
+        for top in ("vcs", "host", "branches", "commit", "release", "deploy"):
+            self.assertEqual(self.prof(d, "unset", top).returncode, 0)
+        self.assertEqual(self.ok(d, "missing").split(),
+                         ["vcs.type", "branches.model", "release.commit", "release.push", "release.integrate",
+                          "commit.style", "deploy"])
+        self.assertEqual([m["fact"] for m in json.loads(self.ok(d, "show", "--json"))["memory"]],
+                         ["run one subagent at a time"])
+        self.assertTrue(self.ok(d, "show", "--brief").strip().endswith("(unconfirmed)"))
+        self.assertEqual(self.git(d, "status", "--porcelain"), "")
 
     def test_profile_is_bound_to_checkout_and_push_url(self):
         d = self.repo(remote="https://github.com/victim/prod.git")
@@ -733,6 +768,18 @@ class StoreTests(Base):
         self.assertNotIn("dropped", r.stdout)
         self.assertNotIn("push", json.loads(self.ok(c, "show", "--json")).get("release", {}))
         self.assertIn("was not set", self.prof(c, "unset", "release.push").stderr)
+
+    def test_commit_tooling_without_history_settles_the_style(self):
+        """The init skill saves `project` when tooling exists but there is no history to read a style from."""
+        d = self.repo(subjects=())
+        (d / "commitlint.config.js").write_text("module.exports = {}")
+        facts = self.detect(d)
+        self.assertIsNone(facts["commit_style"])
+        self.assertTrue(facts["commit_tools"])
+        self.assertIn("commit.style", self.ok(d, "missing").split())
+        style = facts["commit_style"] or ("project" if facts["commit_tools"] else None)
+        self.ok(d, "set", "commit.style", style)
+        self.assertNotIn("commit.style", self.ok(d, "missing").split())
 
     def test_push_auto_needs_a_plain_push_to_the_bound_remote(self):
         d = self.repo(remote="https://github.com/victim/prod.git")

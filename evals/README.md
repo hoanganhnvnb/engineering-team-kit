@@ -38,6 +38,7 @@ Flags `run.sh` sets, and why:
 | `small-fix-stays-small` | Small work isn't over-delegated; repro test first; ledger checked; honest report |
 | `ui-without-browser-is-honest` | No visual claims without a browser; G5 BLOCKED, not PASS |
 | `security-change-gets-independent-review` | SQL + user input → independent reviewer; no string-built SQL; LIKE wildcards handled |
+| `init-asks-only-missing-fields` | `init` detects git, GitHub and Conventional Commits and doesn't ask about them; asks the release and deploy fields; writes nothing into the repo; no subagents, no commit or push |
 
 A run is one sample from a model, so a single failed grader isn't automatically a bug: in
 one check the agent honestly reported that its sandbox wouldn't let it create `.etk/`, so the

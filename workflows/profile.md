@@ -17,6 +17,14 @@ Otherwise the brief profile in the snapshot is all you need.
 
 ## Onboarding
 
+The primary path is `/engineering-team:init`, which the developer runs once at the start of
+a project. It follows the steps below, plus a few project-start notes. This section is the
+single source of the question list. The skills don't repeat it.
+
+The fallback is the lazy path: a `team` run that finds the profile `missing`
+follows these steps itself. Build and fix don't onboard. When you do, add this line to the first question batch:
+"Run /engineering-team:init next time to set this up in one go."
+
 1. Run `profile detect --data …` and use what it finds. Never ask about something it
    already found: VCS, host, CLI login, default branch, commit style and language,
    commit tooling, deploy candidates.
@@ -51,8 +59,9 @@ one line what changed. Any change to the profile undoes its confirmation: its `a
 settings count again only after the user sees `profile show --brief` and you run
 `profile confirm`. A durable note about how they work ("QA resets nightly",
 "never deploy on Fridays") goes in with `profile remember "<fact>" --data …`, after the
-user agrees it should be kept. The file location is `profile path --data …`. To reset,
-delete that file.
+user agrees it should be kept. The file location is `profile path --data …`. To reset the
+settings, run `/engineering-team:init reset`: it clears the settings and keeps the notes.
+Deleting the file resets everything, notes included.
 
 ## Trust
 

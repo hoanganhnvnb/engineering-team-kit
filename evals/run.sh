@@ -31,16 +31,22 @@ fi
 import re, sys
 from pathlib import Path
 skills = list(Path(sys.argv[1], "skills").glob("*/SKILL.md"))
-done = 0
+left = []
 for p in skills:
     s = p.read_text()
-    s, n = re.subn(r'^!`(sh "\$\{CLAUDE_PLUGIN_ROOT\}/scripts/etk\.sh" discover)`$',
-                   r'Run this first with the Bash tool and read its output: `\1`', s, flags=re.M)
+    s = re.sub(r'^!`(sh "\$\{CLAUDE_PLUGIN_ROOT\}/scripts/etk\.sh" discover(?: --data "\$\{CLAUDE_PLUGIN_DATA\}")?)`$',
+               r'Run this first with the Bash tool and read its output: `\1`', s, flags=re.M)
     p.write_text(s)
-    done += n > 0
-if not skills or done != len(skills):
-    sys.exit(f"evals/run.sh: rewrote the snapshot line in {done} of {len(skills)} skills; "
-             "the eval would fail at turn 0 for the rest")
+    fenced = False
+    for line in s.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and re.search(r'!`[^`]+`', line):
+            left.append(p.parent.name)
+            break
+if not skills or left:
+    sys.exit(f"evals/run.sh: a snapshot line was left in {', '.join(left) or 'no skills'}; "
+             "the eval would fail at turn 0 for them")
 EOF
 
 case " $* " in

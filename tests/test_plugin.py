@@ -69,7 +69,7 @@ class Conventions(unittest.TestCase):
 
 class PluginStructure(unittest.TestCase):
     def test_required_commands_exist(self):
-        self.assertEqual(SKILLS, {"build", "fix", "review", "test", "improve-ui", "retro", "readme", "team"})
+        self.assertEqual(SKILLS, {"build", "fix", "review", "test", "improve-ui", "retro", "readme", "team", "init"})
 
     def test_required_agents_exist(self):
         self.assertEqual(AGENTS, {"developer", "code-reviewer", "qa-engineer", "ux-reviewer", "scout", "tech-writer"})
@@ -127,6 +127,64 @@ class PluginStructure(unittest.TestCase):
                 self.assertEqual(fm.get("disable-model-invocation"), "true",
                                  "team workflows are heavy; only the user should start them")
 
+    def test_init_is_lead_only_and_writes_nothing_outside_the_profile(self):
+        path = ROOT / "skills" / "init" / "SKILL.md"
+        fm = frontmatter(path)
+        self.assertEqual(fm.get("disable-model-invocation"), "true")
+        allowed = re.findall(r'Bash\(sh "\$\{CLAUDE_PLUGIN_ROOT\}/scripts/etk\.sh" ([a-z]+):\*\)', fm["allowed-tools"])
+        self.assertEqual(allowed, ["discover", "profile"], "init may only run discover and profile")
+        self.assertEqual(fm["allowed-tools"].count("Bash("), 3)
+        self.assertIn("Bash(git remote get-url --push --all origin)", fm["allowed-tools"])  # the one read-only git call
+        text = " ".join(path.read_text().split())
+        for phrase in ("workflows/profile.md", "profile detect", "profile missing", "profile show --brief",
+                       "profile confirm", "profile path", "Subagents never", "Never write into the repository",
+                       "no hook or check enforces them", "(Recommended)"):
+            self.assertIn(phrase, text, phrase)
+        self.assertNotIn("run init", text.replace("Never run `run init`", ""), "init must not open a ledger")
+        for sub in re.findall(r"`profile ([a-z]+)", text):
+            self.assertIn(sub, {"detect", "missing", "show", "set", "unset", "remember", "confirm", "path"}, sub)
+
+    def test_team_reads_the_notes_and_init_saves_fields_before_notes(self):
+        team = " ".join((ROOT / "skills" / "team" / "SKILL.md").read_text().split())
+        self.assertIn("If a profile exists", team)
+        self.assertIn('profile show --json --data "${CLAUDE_PLUGIN_DATA}"', team)
+        self.assertIn("A note is not a permission", team)
+        init = " ".join((ROOT / "skills" / "init" / "SKILL.md").read_text().split())
+        self.assertLess(init.index("**Save the fields.**"), init.index("**Project-start notes.**"))
+        self.assertLess(init.index("**Project-start notes.**"), init.index("**Confirm.**"))
+        self.assertIn("even though the user said keep", init)
+        for mapping in ("`default_branch` to `branches.default`", "`cli_authed` to `host.cli_authed`",
+                        "`commit_language` to `commit.language`", "`branches.model` is never detected"):
+            self.assertIn(mapping, init, mapping)
+
+    def test_init_does_not_save_a_guessed_style_or_overwrite_user_values(self):
+        init = " ".join((ROOT / "skills" / "init" / "SKILL.md").read_text().split())
+        self.assertIn("`commit_style` to `commit.style` when it is `conventional` or `commit_tools` is not empty", init)
+        self.assertIn("ask the commit style (Conventional Commits first, `(Recommended)`)", init)
+        self.assertIn("Whether or not `profile missing` lists them, save each mapped, non-null detected fact", init)
+        self.assertIn("or `project` (the tooling defines it) when detect has none", init)
+        self.assertIn("whose profile path is currently unset in `profile show --json", init)
+        self.assertIn("never overwrite a value the user set", init)
+        reset = init[init.index("If the argument is `reset`"):init.index("If a profile exists")]
+        self.assertLess(reset.index("`profile unset`"), reset.index("`profile missing"))
+        self.assertIn("Build and fix don't onboard", " ".join((ROOT / "workflows" / "profile.md").read_text().split()))
+        team = " ".join((ROOT / "skills" / "team" / "SKILL.md").read_text().split())
+        self.assertIn("If a profile exists (the block doesn't say `missing`), run", team)
+        usage = " ".join((ROOT / "docs" / "usage.md").read_text().split())
+        self.assertNotIn("the language for commit messages and docs", usage)
+
+    def test_init_save_step_and_reconfirm_branch(self):
+        init = " ".join((ROOT / "skills" / "init" / "SKILL.md").read_text().split())
+        self.assertIn("for each detected fact that step 3 cleared for saving. On the change path of a complete profile bound to this checkout, write only the chosen field", init)
+        self.assertIn("is the re-confirm line", init)
+        self.assertIn("Name those push URLs (cleaned as above) in the release.push question", init)
+        self.assertIn("Show the user the second line of `profile show --brief` (why it is stale", init)
+        self.assertIn("On a stale or incomplete profile, also run step 3", init)
+        self.assertIn("Every branch, keep and change included, goes through step 3", init)
+        self.assertIn("don't ask the style at all", init)
+        self.assertIn("go to steps 6 and 7", init)
+        self.assertIn("`team` runs read them", init)
+
     def test_ship_pushes_to_the_remote_the_profile_binds(self):
         import sys
         sys.path.insert(0, str(ROOT / "scripts"))
@@ -134,9 +192,50 @@ class PluginStructure(unittest.TestCase):
         ship = " ".join((ROOT / "workflows" / "ship.md").read_text().split())
         pushes = re.findall(r"`git push [^`]*?\b(\w+) <branch>`", ship)
         self.assertEqual(pushes, [etk_profile.BOUND_REMOTE])
+        init = " ".join((ROOT / "skills" / "init" / "SKILL.md").read_text().split())
+        self.assertIn(f"git remote get-url --push --all {etk_profile.BOUND_REMOTE}", init)
         self.assertIn(f"git remote get-url --push --all {etk_profile.BOUND_REMOTE}", ship)
-        self.assertIn("drop everything between `://` and the last `@` of the authority", ship)
-        self.assertIn("`?query` and `#fragment`", ship)
+        for text in (init, ship):
+            self.assertIn("drop everything between `://` and the last `@` of the authority", text)
+            self.assertIn("`?query` and `#fragment`", text)
+
+    def test_eval_runner_patches_every_snapshot_line(self):
+        """evals/run.sh rewrites each skill's `!` snapshot line, with or without --data, and skips skills without one."""
+        import shutil
+        import sys
+        import tempfile
+        script = (ROOT / "evals" / "run.sh").read_text()
+        code = re.search(r'"\$ETK_PY" - "\$tmp" <<\'EOF\'\n(.*?)\nEOF\n', script, re.S).group(1)
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copytree(ROOT / "skills", Path(tmp) / "skills")
+            r = subprocess.run([sys.executable, "-I", "-c", code, tmp], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            for name in SKILLS:
+                original = (ROOT / "skills" / name / "SKILL.md").read_text()
+                patched = (Path(tmp) / "skills" / name / "SKILL.md").read_text()
+                with self.subTest(skill=name):
+                    self.assertNotRegex(patched, r"(?m)^!`")
+                    if re.search(r"(?m)^!`", original):
+                        self.assertIn("Run this first with the Bash tool", patched)
+                    else:
+                        self.assertEqual(patched, original)
+        self.assertIn("a snapshot line was left", script)
+        self.assertIn("```", code, "the patch must skip code fences")
+        self.assertIn("--data", "".join(re.findall(r"discover\(\?:[^)]*\)\?", code)))
+
+    def test_workflow_doc_counts_the_step_commands(self):
+        words = {7: "seven", 8: "eight", 9: "nine"}
+        text = (ROOT / "docs" / "workflow.md").read_text()
+        self.assertIn(f"The {words[len(SKILLS) - 1]} step commands", text)
+
+    def test_profile_question_list_has_one_source_and_init_is_the_entry(self):
+        profile = " ".join((ROOT / "workflows" / "profile.md").read_text().split())
+        self.assertIn("/engineering-team:init", profile)
+        self.assertIn("Run /engineering-team:init next time to set this up in one go.", profile)
+        self.assertIn("/engineering-team:init", (ROOT / "skills" / "team" / "SKILL.md").read_text())
+        for name in SKILLS - {"init"}:
+            text = (ROOT / "skills" / name / "SKILL.md").read_text()
+            self.assertNotIn("release.integrate", text, f"{name} duplicates the profile question list")
 
     def test_parallel_reviewers_get_distinct_id_prefixes(self):
         reviewer = (ROOT / "agents" / "code-reviewer.md").read_text()
@@ -191,7 +290,7 @@ class PluginStructure(unittest.TestCase):
                     self.assertNotIn(phrase, text)
 
     def test_progress_log_counts_match_the_repo(self):
-        words = {4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight"}
+        words = {4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine"}
         progress = (ROOT / "docs" / "PROGRESS.md").read_text()
         self.assertIn(f"{len(AGENTS)} subagents", progress)
         self.assertIn(f"all {words[len(SKILLS) - 1]} step skills", progress)
