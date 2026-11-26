@@ -990,8 +990,15 @@ def main(argv: list[str] | None = None) -> int:
         raw, rest = pop_data(argv)
         a = build_parser().parse_args(rest)
         data = data_dir(raw)
+        saving = a.cmd in {"set", "unset", "confirm", "remember"}
         ident = identify(None, data)
-        ident = keyed(ident, data, create=a.cmd in {"set", "unset", "confirm", "remember"})
+        ident = keyed(ident, data, create=saving)
+
+        def store(prof: dict) -> None:
+            save(path, prof, data)
+            if saving and not _read_key(data / KEY_FILE):
+                print(f"etk profile: could not store the binding key in {data}: this profile will be stale next time",
+                      file=sys.stderr)
         path = profile_path(data, ident)
         if a.cmd == "path":
             print(path)
@@ -1011,7 +1018,7 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "set":
             base, dropped = adopt(load(path), ident)
             prof = set_value(base, a.dotted, parse_value(a.value))
-            save(path, stamp(prof, ident), data)
+            store(stamp(prof, ident))
             print(f"set {a.dotted}")
             report_dropped(dropped)
         elif a.cmd == "unset":
@@ -1019,7 +1026,7 @@ def main(argv: list[str] | None = None) -> int:
             changed = unset_value(prof, a.dotted)
             was_dropped = any(d.split("=")[0] == a.dotted for d in dropped)
             if changed or dropped:
-                save(path, stamp(prof, ident), data)
+                store(stamp(prof, ident))
             if changed or was_dropped:
                 print(f"unset {a.dotted}")
             else:
@@ -1032,7 +1039,7 @@ def main(argv: list[str] | None = None) -> int:
             prof = stamp(effective(raw, ident) if checkout_mismatch(raw, ident) else raw, ident, rebind=True)
             prof["confirmed_at"] = prof["updated_at"]
             prof["confirmed_hash"] = settings_hash(prof)
-            save(path, prof, data)
+            store(prof)
             print(f"confirmed {path}")
             if checkout_mismatch(raw, ident):
                 rel = raw.get("release") if isinstance(raw.get("release"), dict) else {}
@@ -1049,7 +1056,7 @@ def main(argv: list[str] | None = None) -> int:
             mem.append({"fact": fact, "source": a.source, "date": dt.date.today().isoformat()})
             prof["memory"] = mem[-MAX_MEMORY:]
             # A note grants nothing, so it keeps `updated_at` and doesn't call for a new confirm.
-            save(path, prof if prof.get("updated_at") else stamp(adopt(prof, ident)[0], ident), data)
+            store(prof if prof.get("updated_at") else stamp(adopt(prof, ident)[0], ident))
             print(f"remembered ({len(prof['memory'])} note(s))")
         return 0
     except UsageError as e:

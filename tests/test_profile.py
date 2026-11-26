@@ -1064,6 +1064,31 @@ class StoreTests(Base):
         cfg.write_text(base + "[http]\n\tsslVerify\n")
         self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
 
+    def test_saving_commands_warn_when_the_binding_key_cannot_be_stored(self):
+        d = self.repo("nokey", "https://github.com/victim/prod.git")
+        stub = self.tmp / "stub"
+        stub.mkdir()
+        (stub / "sitecustomize.py").write_text(
+            "import os\ndef _no(*a, **k):\n    raise OSError(95, 'not supported')\nos.link = _no\n")
+        self.env["PYTHONPATH"] = str(stub)
+        for args in (("set", "release.push", "auto"), ("confirm",), ("remember", "a fact"),
+                     ("set", "vcs.type", "git"), ("unset", "vcs.type")):
+            with self.subTest(args=args):
+                r = self.prof(d, *args)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn(f"could not store the binding key in {self.data}", r.stderr)
+                self.assertFalse(self.key_path().exists())
+        for args in (("show",), ("show", "--brief"), ("missing",), ("path",), ("detect",),
+                     ("remember", "a fact"), ("unset", "release.integrate"), ("set", "release.push", "bogus")):
+            with self.subTest(args=args):  # reads, a duplicate note, an unset of nothing and a failed set save nothing
+                r = self.prof(d, *args)
+                self.assertNotIn("binding key", r.stderr)
+        self.assertEqual([p.name for p in self.data.iterdir() if p.name == etk_profile.KEY_FILE], [])
+        del self.env["PYTHONPATH"]
+        r = self.prof(d, "set", "release.push", "auto")
+        self.assertEqual(r.stderr, "")
+        self.assertTrue(self.key_path().exists())
+
     def test_a_data_dir_inside_the_repository_is_refused_everywhere(self):
         d = self.repo("inrepo", "https://github.com/victim/prod.git")
         inside = d / "plugins" / "data" / "x"

@@ -37,6 +37,8 @@ All notable changes to this plugin. Versions follow semver; the version in
   `gh repo set-default`), which does not change where a push goes; it does choose the repository
   `gh pr create` targets, which is not covered (nor is `GH_REPO`). `submodule.*.url` is still hashed: the first
   `git submodule update --init` or `sync` makes a profile stale once.
+- `profile set|unset|confirm|remember` warn on stderr when the binding key cannot be stored (the
+  profile will be stale next time); exit codes are unchanged.
 
 ## 0.6.0
 
