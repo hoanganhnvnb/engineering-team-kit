@@ -1009,7 +1009,8 @@ class StoreTests(Base):
                      ("core.sshCommand", "ssh -o ProxyCommand=x"), ("http.proxy", "http://p.example:3128"),
                      ("http.https://github.com/.proxy", "http://p.example:3128"), ("http.sslVerify", "false"),
                      ("http.extraHeader", "X: y"), ("push.recurseSubmodules", "on-demand"),
-                     ("submodule.recurse", "true"), ("push.default", "matching"))
+                     ("submodule.recurse", "true"), ("push.default", "matching"),
+                     ("submodule.lib.url", "https://evil.example/x.git"))
 
     def test_settings_that_redirect_a_push_make_the_profile_stale(self):
         remote = "https://github.com/victim/prod.git"
@@ -1039,11 +1040,110 @@ class StoreTests(Base):
         self.git(d, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
         self.git(d, "config", "remote.origin.tagopt", "--no-tags")
         self.git(d, "config", "remote.origin.push", "refs/heads/feat/x")
+        self.git(d, "config", "remote.origin.gh-resolved", "base")
         self.git(d, "config", "user.name", "someone")
         self.git(d, "config", "core.autocrlf", "false")
         self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
         self.assertEqual(self.authorize(d, self.open_run(d), "push").returncode, 0)
         self.assertEqual(self.preflight(d, run).returncode, 0)
+
+    def test_a_valueless_boolean_and_an_empty_value_are_not_the_same_setting(self):
+        d = self.repo("bool", "https://github.com/victim/prod.git")
+        cfg = d / ".git" / "config"
+        base = cfg.read_text()
+        cfg.write_text(base + "[http]\n\tsslVerify\n")  # no value: true
+        run = self.ship_ready(d)
+        self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+        cfg.write_text(base + "[http]\n\tsslVerify =\n")  # empty value: false
+        self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+        self.assertEqual(self.preflight(d, run).returncode, 1)
+        cfg.write_text(base + "[http]\n\tsslVerify\n")
+        self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+        cfg.write_text(base + "[http]\n\tsslVerify =\n")
+        self.ok(d, "confirm")
+        cfg.write_text(base + "[http]\n\tsslVerify\n")
+        self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+
+    def test_saving_commands_warn_when_the_binding_key_cannot_be_stored(self):
+        d = self.repo("nokey", "https://github.com/victim/prod.git")
+        stub = self.tmp / "stub"
+        stub.mkdir()
+        (stub / "sitecustomize.py").write_text(
+            "import os\ndef _no(*a, **k):\n    raise OSError(95, 'not supported')\nos.link = _no\n")
+        self.env["PYTHONPATH"] = str(stub)
+        for args in (("set", "release.push", "auto"), ("confirm",), ("remember", "a fact"),
+                     ("set", "vcs.type", "git"), ("unset", "vcs.type")):
+            with self.subTest(args=args):
+                r = self.prof(d, *args)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn(f"could not store the binding key in {self.data}", r.stderr)
+                self.assertFalse(self.key_path().exists())
+        for args in (("show",), ("show", "--brief"), ("missing",), ("path",), ("detect",),
+                     ("remember", "a fact"), ("unset", "release.integrate"), ("set", "release.push", "bogus")):
+            with self.subTest(args=args):  # reads, a duplicate note, an unset of nothing and a failed set save nothing
+                r = self.prof(d, *args)
+                self.assertNotIn("binding key", r.stderr)
+        self.assertEqual([p.name for p in self.data.iterdir() if p.name == etk_profile.KEY_FILE], [])
+        del self.env["PYTHONPATH"]
+        r = self.prof(d, "set", "release.push", "auto")
+        self.assertEqual(r.stderr, "")
+        self.assertTrue(self.key_path().exists())
+
+    def test_a_data_dir_inside_the_repository_is_refused_everywhere(self):
+        d = self.repo("inrepo", "https://github.com/victim/prod.git")
+        inside = d / "plugins" / "data" / "x"
+        inside.mkdir(parents=True)
+        run = self.ship_ready(d)
+        for args in (("show",), ("set", "release.push", "auto"), ("confirm",)):
+            r = self.prof(d, *args, data=str(inside))
+            self.assertEqual(r.returncode, 2, args)
+            self.assertIn("inside the repository", r.stderr)
+        self.assertFalse((inside / etk_profile.KEY_FILE).exists())
+        etk = ["--data", str(inside), str(run)]
+        for cmd in (["authorize", "--action", "push", "--source", "profile"], ["preflight", "--action", "push"],
+                    ["act", "--action", "push", "--exit", "0"],
+                    ["authorize", "--action", "push", "--source", "prompt", "--quote", "push it please"]):
+            r = subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), *cmd, *etk], cwd=d, env=self.env,
+                               capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 2, (cmd, r.stdout))
+            self.assertIn("inside the repository", r.stderr)
+        for fn in (etk_profile.snapshot, etk_profile.load_for):
+            with self.assertRaises(etk_profile.UsageError):
+                fn(str(inside), d)
+        with self.assertRaises(etk_profile.UsageError):
+            etk_profile.identify(d, inside)
+        self.assertEqual(self.prof(d, "show").returncode, 0)  # a data dir outside works
+
+    def test_a_data_dir_inside_a_subversion_working_copy_is_refused_everywhere(self):
+        wc = self.tmp / "wc"
+        (wc / ".svn").mkdir(parents=True)
+        (wc / "trunk").mkdir()
+        inside = wc / "plugins" / "data" / "x"
+        inside.mkdir(parents=True)
+        self.env["PATH"] = self.bin_dir("nosvn", ("git",))
+        cwd = wc / "trunk"
+        for args in (("show",), ("set", "release.push", "auto"), ("confirm",)):
+            r = self.prof(cwd, *args, data=str(inside))
+            self.assertEqual(r.returncode, 2, args)
+            self.assertIn("inside the repository", r.stderr)
+        self.assertEqual(list(inside.iterdir()), [])
+        run = self.tmp / "somerun"
+        for cmd in (["authorize", "--action", "push", "--source", "profile"], ["preflight", "--action", "push"],
+                    ["act", "--action", "push", "--exit", "0"],
+                    ["authorize", "--action", "push", "--source", "prompt", "--quote", "push it please"]):
+            r = subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), *cmd, "--data", str(inside), str(run)],
+                               cwd=cwd, env=self.env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 2, (cmd, r.stdout))
+            self.assertIn("inside the repository", r.stderr)
+        real = Path.cwd()
+        try:
+            os.chdir(cwd)
+            for fn in (etk_profile.snapshot, etk_profile.load_for):
+                with self.assertRaises(etk_profile.UsageError):
+                    fn(str(inside), cwd)
+        finally:
+            os.chdir(real)
+        self.assertEqual(self.prof(cwd, "show").returncode, 0)
 
     def key_path(self):
         return self.data / etk_profile.KEY_FILE

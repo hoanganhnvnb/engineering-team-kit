@@ -142,6 +142,19 @@ def data_dir(raw: str | None) -> Path:
     return real
 
 
+def refuse_data_in_repo(data: Path, root: Path) -> None:
+    """The profile (and the binding key) must live outside the work tree it describes."""
+    if data == root or root in data.parents:
+        raise UsageError(f"--data {data} is inside the repository; the profile must live outside it")
+
+
+def check_data_dir(raw: str | None, cwd: Path | None = None) -> Path:
+    """`data_dir`, and refuses a data dir inside the git or svn work tree at `cwd`."""
+    data = data_dir(raw)
+    identify(cwd, data)
+    return data
+
+
 # ---------------------------------------------------------------- project identity
 
 NOT_SHOWN = "(remote not shown)"
@@ -322,7 +335,7 @@ def push_remote(root: Path) -> str:
 # helper and proxy settings, `http.*` (proxy, TLS verification, extra headers), `push.*` and
 # submodule recursion. Hashed, never stored or shown.
 PUSH_CONFIG = re.compile(
-    rf"^(remote\.{BOUND_REMOTE}\.(?!(url|pushurl|fetch|push|tagopt|prune|prunetags|promisor|partialclonefilter)$)|"
+    rf"^(remote\.{BOUND_REMOTE}\.(?!(url|pushurl|fetch|push|tagopt|prune|prunetags|promisor|partialclonefilter|gh-resolved)$)|"
     r"http\.|push\.|submodule\.recurse$|submodule\..*\.url$|core\.(sshcommand|gitproxy)$)", re.I)
 
 
@@ -334,9 +347,10 @@ def push_config(root: Path) -> str | None:
         return None
     entries = []
     for item in out.split("\0"):
-        key, _, value = item.partition("\n")
+        key, sep, value = item.partition("\n")
         if key and PUSH_CONFIG.match(key):
-            entries.append(f"{key.lower()}={value}")
+            # no value (a boolean that is true) and an empty value (false) must not look alike
+            entries.append(f"{key.lower()}={value}" if sep else key.lower())
     return "\n".join(sorted(entries))
 
 
@@ -380,6 +394,8 @@ def identify(cwd: Path | None = None, data: Path | None = None) -> dict:
         root = Path(os.path.realpath(root)) if root else cwd
         if vcs == "svn" and shutil.which("svn"):
             remote = run(["svn", "info", "--non-interactive", "--show-item", "repos-root-url"], root) or None
+    if data is not None and vcs != "none":
+        refuse_data_in_repo(data, root)
     basis = "remote:" + normalize_remote(remote) if remote else "root:" + str(root)
     return keyed({"vcs": vcs, "root": str(root), "remote": remote, "origin_all": origin_all, "push_all": push_all,
                   "config_all": config_all, "push_ok": push_ok,
@@ -974,11 +990,15 @@ def main(argv: list[str] | None = None) -> int:
         raw, rest = pop_data(argv)
         a = build_parser().parse_args(rest)
         data = data_dir(raw)
-        ident = identify()
-        root = Path(ident["root"])
-        if ident["vcs"] != "none" and (data == root or root in data.parents):
-            raise UsageError(f"--data {data} is inside the repository; the profile must live outside it")
-        ident = keyed(ident, data, create=a.cmd in {"set", "unset", "confirm", "remember"})
+        saving = a.cmd in {"set", "unset", "confirm", "remember"}
+        ident = identify(None, data)
+        ident = keyed(ident, data, create=saving)
+
+        def store(prof: dict) -> None:
+            save(path, prof, data)
+            if saving and not _read_key(data / KEY_FILE):
+                print(f"etk profile: could not store the binding key in {data}: this profile will be stale next time",
+                      file=sys.stderr)
         path = profile_path(data, ident)
         if a.cmd == "path":
             print(path)
@@ -998,7 +1018,7 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "set":
             base, dropped = adopt(load(path), ident)
             prof = set_value(base, a.dotted, parse_value(a.value))
-            save(path, stamp(prof, ident), data)
+            store(stamp(prof, ident))
             print(f"set {a.dotted}")
             report_dropped(dropped)
         elif a.cmd == "unset":
@@ -1006,7 +1026,7 @@ def main(argv: list[str] | None = None) -> int:
             changed = unset_value(prof, a.dotted)
             was_dropped = any(d.split("=")[0] == a.dotted for d in dropped)
             if changed or dropped:
-                save(path, stamp(prof, ident), data)
+                store(stamp(prof, ident))
             if changed or was_dropped:
                 print(f"unset {a.dotted}")
             else:
@@ -1019,7 +1039,7 @@ def main(argv: list[str] | None = None) -> int:
             prof = stamp(effective(raw, ident) if checkout_mismatch(raw, ident) else raw, ident, rebind=True)
             prof["confirmed_at"] = prof["updated_at"]
             prof["confirmed_hash"] = settings_hash(prof)
-            save(path, prof, data)
+            store(prof)
             print(f"confirmed {path}")
             if checkout_mismatch(raw, ident):
                 rel = raw.get("release") if isinstance(raw.get("release"), dict) else {}
@@ -1036,7 +1056,7 @@ def main(argv: list[str] | None = None) -> int:
             mem.append({"fact": fact, "source": a.source, "date": dt.date.today().isoformat()})
             prof["memory"] = mem[-MAX_MEMORY:]
             # A note grants nothing, so it keeps `updated_at` and doesn't call for a new confirm.
-            save(path, prof if prof.get("updated_at") else stamp(adopt(prof, ident)[0], ident), data)
+            store(prof if prof.get("updated_at") else stamp(adopt(prof, ident)[0], ident))
             print(f"remembered ({len(prof['memory'])} note(s))")
         return 0
     except UsageError as e:

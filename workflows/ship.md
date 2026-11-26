@@ -80,7 +80,8 @@ etk run authorize --action deploy --target staging --source prompt \
   the git settings that decide where a push goes, and that a plain push goes to `origin`).
   Tests run repo code between authorization and push, so the check at `act` time comes too late
   to stop a push. If it fails, do not push: show the reason, and ask for permission in the user's
-  words or have the profile confirmed again.
+  words or have the profile confirmed again. This is a step you run: the guard does not
+  enforce it and nothing records that it ran.
 - Push only the current branch, to `origin`, the remote the profile binds, because the profile
   hashes every push URL of `origin`: `git push -u origin <branch>`. Never
   `--force`. If the branch has no upstream, or you would push to a protected or

@@ -289,6 +289,23 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.assertIn("**Authorizations**", out)
         self.assertIn("| push | origin/feat | abc123 | 0 |", out)
 
+    def test_push_authorized_by_the_users_words_records_without_data(self):
+        run = self.ship_run()
+        r = self.etk("authorize", "--action", "push", "--source", "prompt", "--quote", "push it when review passes", str(run))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = self.etk("act", "--action", "push", "--target", "origin/feat", "--exit", "0", str(run))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.ledger(run)["actions"][0]["action"], "push")
+
+    def test_push_authorized_by_the_profile_is_refused_without_data(self):
+        run = self.ship_run()
+        self.auth_profile(run, "push")
+        before = (run / "gates.json").read_text()
+        r = self.etk("act", "--action", "push", "--target", "origin/feat", "--exit", "0", str(run))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--data", r.stderr)
+        self.assertEqual((run / "gates.json").read_text(), before)
+
     def test_push_before_gates_pass_fails_check(self):
         run, _ = self.init("--kind", "ship")
         self.etk("authorize", "--action", "push", "--source", "prompt", "--quote", "push when ready", str(run))
