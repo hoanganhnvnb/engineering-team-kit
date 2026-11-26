@@ -28,6 +28,8 @@ All notable changes to this plugin. Versions follow semver; the version in
   corrupting the key does the same.
 - `etk run authorize` records the binding from the stored profile it just checked instead of a
   second look at the repository.
+- The binding's settings hash tells a valueless boolean (`sslVerify`, true) from an empty value
+  (`sslVerify =`, false).
 
 ## 0.6.0
 

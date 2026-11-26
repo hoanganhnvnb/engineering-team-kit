@@ -1045,6 +1045,23 @@ class StoreTests(Base):
         self.assertEqual(self.authorize(d, self.open_run(d), "push").returncode, 0)
         self.assertEqual(self.preflight(d, run).returncode, 0)
 
+    def test_a_valueless_boolean_and_an_empty_value_are_not_the_same_setting(self):
+        d = self.repo("bool", "https://github.com/victim/prod.git")
+        cfg = d / ".git" / "config"
+        base = cfg.read_text()
+        cfg.write_text(base + "[http]\n\tsslVerify\n")  # no value: true
+        run = self.ship_ready(d)
+        self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+        cfg.write_text(base + "[http]\n\tsslVerify =\n")  # empty value: false
+        self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+        self.assertEqual(self.preflight(d, run).returncode, 1)
+        cfg.write_text(base + "[http]\n\tsslVerify\n")
+        self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+        cfg.write_text(base + "[http]\n\tsslVerify =\n")
+        self.ok(d, "confirm")
+        cfg.write_text(base + "[http]\n\tsslVerify\n")
+        self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+
     def key_path(self):
         return self.data / etk_profile.KEY_FILE
 

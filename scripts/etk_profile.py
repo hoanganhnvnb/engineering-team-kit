@@ -334,9 +334,10 @@ def push_config(root: Path) -> str | None:
         return None
     entries = []
     for item in out.split("\0"):
-        key, _, value = item.partition("\n")
+        key, sep, value = item.partition("\n")
         if key and PUSH_CONFIG.match(key):
-            entries.append(f"{key.lower()}={value}")
+            # no value (a boolean that is true) and an empty value (false) must not look alike
+            entries.append(f"{key.lower()}={value}" if sep else key.lower())
     return "\n".join(sorted(entries))
 
 
