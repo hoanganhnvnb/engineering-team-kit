@@ -793,6 +793,15 @@ def load_profile(raw_data: str | None) -> tuple[dict, Path, bytes | None, bool]:
         refuse(f"profile: {e}")
 
 
+def check_data(raw_data: str | None) -> None:
+    """Refuses (exit 2) a --data that is not a plugin data dir or lies inside this repository."""
+    if raw_data:
+        try:
+            etk_profile.check_data_dir(raw_data)
+        except etk_profile.UsageError as e:
+            refuse(f"profile: {e}")
+
+
 def profile_says_auto(prof: dict, action: str) -> str | None:
     """Why the profile doesn't pre-authorize `action`, or None when it does."""
     get = etk_profile.get
@@ -816,6 +825,7 @@ def profile_unconfirmed(prof: dict) -> str | None:
 
 
 def cmd_authorize(a) -> int:
+    check_data(a.data)
     quote = (a.quote or "").strip()
     if a.source == "profile" and a.action not in PROFILE_OK:
         refuse(f"a workflow profile can only authorize {', '.join(sorted(PROFILE_OK))}; "
@@ -914,6 +924,7 @@ def cmd_ready(a) -> int:
 def cmd_preflight(a) -> int:
     """Run right before `git push` / `gh pr create`: `ready`, plus the binding re-check of a
     profile-authorized push or PR, which `act` can only audit after the fact."""
+    check_data(a.data)
     p = resolve(a.path)
     led = load(p)
     unauthorized = [] if any(isinstance(x, dict) and x.get("action") == a.action
@@ -930,6 +941,7 @@ def cmd_preflight(a) -> int:
 
 
 def cmd_act(a) -> int:
+    check_data(a.data)
     production = a.production
     if a.action in {"deploy", "rollback"} and not a.data:
         refuse(f"act --action {a.action} needs --data DIR (the plugin data dir) so the profile can say "

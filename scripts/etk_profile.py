@@ -142,6 +142,19 @@ def data_dir(raw: str | None) -> Path:
     return real
 
 
+def refuse_data_in_repo(data: Path, root: Path) -> None:
+    """The profile (and the binding key) must live outside the work tree it describes."""
+    if data == root or root in data.parents:
+        raise UsageError(f"--data {data} is inside the repository; the profile must live outside it")
+
+
+def check_data_dir(raw: str | None, cwd: Path | None = None) -> Path:
+    """`data_dir`, and refuses a data dir inside the git or svn work tree at `cwd`."""
+    data = data_dir(raw)
+    identify(cwd, data)
+    return data
+
+
 # ---------------------------------------------------------------- project identity
 
 NOT_SHOWN = "(remote not shown)"
@@ -381,6 +394,8 @@ def identify(cwd: Path | None = None, data: Path | None = None) -> dict:
         root = Path(os.path.realpath(root)) if root else cwd
         if vcs == "svn" and shutil.which("svn"):
             remote = run(["svn", "info", "--non-interactive", "--show-item", "repos-root-url"], root) or None
+    if data is not None and vcs != "none":
+        refuse_data_in_repo(data, root)
     basis = "remote:" + normalize_remote(remote) if remote else "root:" + str(root)
     return keyed({"vcs": vcs, "root": str(root), "remote": remote, "origin_all": origin_all, "push_all": push_all,
                   "config_all": config_all, "push_ok": push_ok,
@@ -975,10 +990,7 @@ def main(argv: list[str] | None = None) -> int:
         raw, rest = pop_data(argv)
         a = build_parser().parse_args(rest)
         data = data_dir(raw)
-        ident = identify()
-        root = Path(ident["root"])
-        if ident["vcs"] != "none" and (data == root or root in data.parents):
-            raise UsageError(f"--data {data} is inside the repository; the profile must live outside it")
+        ident = identify(None, data)
         ident = keyed(ident, data, create=a.cmd in {"set", "unset", "confirm", "remember"})
         path = profile_path(data, ident)
         if a.cmd == "path":

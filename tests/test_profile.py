@@ -1064,6 +1064,62 @@ class StoreTests(Base):
         cfg.write_text(base + "[http]\n\tsslVerify\n")
         self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
 
+    def test_a_data_dir_inside_the_repository_is_refused_everywhere(self):
+        d = self.repo("inrepo", "https://github.com/victim/prod.git")
+        inside = d / "plugins" / "data" / "x"
+        inside.mkdir(parents=True)
+        run = self.ship_ready(d)
+        for args in (("show",), ("set", "release.push", "auto"), ("confirm",)):
+            r = self.prof(d, *args, data=str(inside))
+            self.assertEqual(r.returncode, 2, args)
+            self.assertIn("inside the repository", r.stderr)
+        self.assertFalse((inside / etk_profile.KEY_FILE).exists())
+        etk = ["--data", str(inside), str(run)]
+        for cmd in (["authorize", "--action", "push", "--source", "profile"], ["preflight", "--action", "push"],
+                    ["act", "--action", "push", "--exit", "0"],
+                    ["authorize", "--action", "push", "--source", "prompt", "--quote", "push it please"]):
+            r = subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), *cmd, *etk], cwd=d, env=self.env,
+                               capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 2, (cmd, r.stdout))
+            self.assertIn("inside the repository", r.stderr)
+        for fn in (etk_profile.snapshot, etk_profile.load_for):
+            with self.assertRaises(etk_profile.UsageError):
+                fn(str(inside), d)
+        with self.assertRaises(etk_profile.UsageError):
+            etk_profile.identify(d, inside)
+        self.assertEqual(self.prof(d, "show").returncode, 0)  # a data dir outside works
+
+    def test_a_data_dir_inside_a_subversion_working_copy_is_refused_everywhere(self):
+        wc = self.tmp / "wc"
+        (wc / ".svn").mkdir(parents=True)
+        (wc / "trunk").mkdir()
+        inside = wc / "plugins" / "data" / "x"
+        inside.mkdir(parents=True)
+        self.env["PATH"] = self.bin_dir("nosvn", ("git",))
+        cwd = wc / "trunk"
+        for args in (("show",), ("set", "release.push", "auto"), ("confirm",)):
+            r = self.prof(cwd, *args, data=str(inside))
+            self.assertEqual(r.returncode, 2, args)
+            self.assertIn("inside the repository", r.stderr)
+        self.assertEqual(list(inside.iterdir()), [])
+        run = self.tmp / "somerun"
+        for cmd in (["authorize", "--action", "push", "--source", "profile"], ["preflight", "--action", "push"],
+                    ["act", "--action", "push", "--exit", "0"],
+                    ["authorize", "--action", "push", "--source", "prompt", "--quote", "push it please"]):
+            r = subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), *cmd, "--data", str(inside), str(run)],
+                               cwd=cwd, env=self.env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 2, (cmd, r.stdout))
+            self.assertIn("inside the repository", r.stderr)
+        real = Path.cwd()
+        try:
+            os.chdir(cwd)
+            for fn in (etk_profile.snapshot, etk_profile.load_for):
+                with self.assertRaises(etk_profile.UsageError):
+                    fn(str(inside), cwd)
+        finally:
+            os.chdir(real)
+        self.assertEqual(self.prof(cwd, "show").returncode, 0)
+
     def key_path(self):
         return self.data / etk_profile.KEY_FILE
 

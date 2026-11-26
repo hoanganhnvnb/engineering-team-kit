@@ -28,6 +28,10 @@ All notable changes to this plugin. Versions follow semver; the version in
   corrupting the key does the same.
 - `etk run authorize` records the binding from the stored profile it just checked instead of a
   second look at the repository.
+- A `--data` dir inside the repository (git or svn) is now refused (exit 2) by
+  `etk run authorize|preflight|act` as well as by every `profile` command; `discover` reports the
+  profile as unknown. These three also refuse any other invalid `--data` (not a plugin data dir,
+  unsubstituted `${...}`) whenever it is given, also for an action authorized by the user's own words.
 - The binding's settings hash tells a valueless boolean (`sslVerify`, true) from an empty value
   (`sslVerify =`, false), and ignores `remote.origin.gh-resolved` (written by
   `gh repo set-default`), which does not change where a push goes; it does choose the repository
