@@ -7,12 +7,19 @@ All notable changes to this plugin. Versions follow semver; the version in
 
 - Security: `etk run preflight --action push|pr --data DIR [RUN]` re-checks, right before
   `git push` and `gh pr create`, that the run is `ready` and that a profile-authorized push or
-  PR still matches what the profile was confirmed for (checkout, origin and push URLs, and a plain
-  `git push` going to `origin`). It exits 1 with the reason and nothing is sent. `workflows/ship.md` and the `team` skill run it before
+  PR still matches what the profile was confirmed for (checkout, origin and push URLs, the git
+  settings that decide where a push goes, and a plain `git push` going to `origin`). It exits 1
+  with the reason and nothing is sent. `workflows/ship.md` and the `team` skill run it before
   each outward push or PR. The check in `etk run act` is an audit made after the step: it now
   records `binding_ok` for push and PR, also with `--force-record`, and `etk run check` fails a
   run whose push or PR was recorded with `binding_ok: false`. A profile-authorized push or PR
   needs `--data` on `act`.
+- Security: the binding also hashes the git settings that change where a push goes with the URLs
+  unchanged: `remote.origin.*` (receivepack, vcs, proxy, mirror and the like; not the URLs,
+  refspecs, tagopt or prune), `core.sshCommand`, `core.gitProxy`, `http.*`, `push.*`,
+  `submodule.recurse` and `submodule.*.url`. A change makes the profile stale with the reason
+  "git settings that decide where a push goes changed". The guard also stops subagents changing
+  `http.*` and `submodule.*` through `git config`. Remaining limits are in `docs/limitations.md`.
 - `etk run authorize` records the binding from the stored profile it just checked instead of a
   second look at the repository.
 

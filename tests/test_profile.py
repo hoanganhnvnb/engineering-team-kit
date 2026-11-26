@@ -621,7 +621,7 @@ class StoreTests(Base):
         self.assertIn("older format", self.ok(d, "show", "--brief"))
         self.assertIn("dropped release.push=auto", self.ok(d, "set", "release.commit", "auto"))
         stored = json.loads(path.read_text())
-        self.assertEqual(sorted(stored["project"]), ["key", "origin_hash", "push_hash", "root"])
+        self.assertEqual(sorted(stored["project"]), ["config_hash", "key", "origin_hash", "push_hash", "root"])
 
     def test_same_checkout_keeps_auto_values_and_confirmed_state(self):
         d = self.repo(remote="https://github.com/o/r.git")
@@ -995,6 +995,61 @@ class StoreTests(Base):
         stored = json.loads(self.ok(d, "show", "--json"))["project"]
         au = json.loads((Path(run) / "gates.json").read_text())["authorizations"][0]["binding"]
         self.assertEqual(au, {k: stored[k] for k in etk_profile.BOUND_FIELDS})
+
+    PUSH_SETTINGS = (("remote.origin.receivepack", "/tmp/x"), ("remote.origin.vcs", "ext"),
+                     ("remote.origin.proxy", "http://p.example:3128"), ("remote.origin.mirror", "true"),
+                     ("core.sshCommand", "ssh -o ProxyCommand=x"), ("http.proxy", "http://p.example:3128"),
+                     ("http.https://github.com/.proxy", "http://p.example:3128"), ("http.sslVerify", "false"),
+                     ("http.extraHeader", "X: y"), ("push.recurseSubmodules", "on-demand"),
+                     ("submodule.recurse", "true"), ("push.default", "matching"))
+
+    def test_settings_that_redirect_a_push_make_the_profile_stale(self):
+        remote = "https://github.com/victim/prod.git"
+        for n, (key, value) in enumerate(self.PUSH_SETTINGS):
+            with self.subTest(key=key):
+                d = self.repo(f"s{n}", remote)
+                run = self.ship_ready(d)
+                self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+                self.git(d, "config", key, value)
+                lines = self.ok(d, "show", "--brief").splitlines()
+                self.assertEqual(lines[0], etk_profile.RECONFIRM)
+                self.assertEqual(lines[1], "git settings that decide where a push goes changed")
+                self.assertNotIn(value, "\n".join(lines))
+                r = self.authorize(d, self.open_run(d), "push")
+                self.assertEqual(r.returncode, 2)
+                self.assertEqual(self.preflight(d, run).returncode, 1)
+                self.git(d, "config", "--unset", key)
+                self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+
+    def test_normal_git_use_does_not_make_the_profile_stale(self):
+        d = self.repo("normal", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        self.git(d, "commit", "-q", "--allow-empty", "-m", "more")
+        self.git(d, "checkout", "-q", "-b", "feat/x")
+        self.git(d, "config", "branch.feat/x.remote", "origin")
+        self.git(d, "config", "branch.feat/x.merge", "refs/heads/feat/x")
+        self.git(d, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+        self.git(d, "config", "remote.origin.tagopt", "--no-tags")
+        self.git(d, "config", "remote.origin.push", "refs/heads/feat/x")
+        self.git(d, "config", "user.name", "someone")
+        self.git(d, "config", "core.autocrlf", "false")
+        self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+        self.assertEqual(self.authorize(d, self.open_run(d), "push").returncode, 0)
+        self.assertEqual(self.preflight(d, run).returncode, 0)
+
+    def test_garbage_stored_binding_never_raises(self):
+        d = self.repo("garb", "https://github.com/victim/prod.git")
+        self.ok(d, "set", "release.push", "auto")
+        self.ok(d, "confirm")
+        path = Path(self.ok(d, "path").strip())
+        for junk in ({"project": {"root": 1, "origin_hash": {}, "push_hash": [], "config_hash": None}},
+                     {"project": {"root": "x"}}, {"project": "x"}, ["x"]):
+            path.write_text(json.dumps(junk))
+            r = self.prof(d, "show", "--brief")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+        path.write_text("{not json")
+        self.assertEqual(self.prof(d, "show", "--brief").returncode, 0)
 
     def test_local_path_origins_and_parsed_remotes_have_different_keys(self):
         local = self.repo("loc", "github.com/o/r")

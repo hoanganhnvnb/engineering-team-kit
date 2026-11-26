@@ -855,9 +855,9 @@ def cmd_authorize(a) -> int:
 
 
 def profile_authorization_moved(led: dict, action: str, raw_data: str | None) -> str | None:
-    """Why a push or PR the workflow profile pre-authorized may not go ahead now: the checkout or
-    any origin or push URL differs from what the profile was confirmed for when it was authorized,
-    or a plain `git push` no longer goes to `origin`.
+    """Why a push or PR the workflow profile pre-authorized may not go ahead now: the checkout, an
+    origin or push URL or a git setting that decides where a push goes differs from what the profile
+    was confirmed for when it was authorized, or a plain `git push` no longer goes to `origin`.
     A user's own words for the action (prompt, answer) don't depend on the profile."""
     auths = [x for x in ledger_list(led, "authorizations")
              if isinstance(x, dict) and x.get("action") == action]
@@ -870,8 +870,8 @@ def profile_authorization_moved(led: dict, action: str, raw_data: str | None) ->
     now = etk_profile.binding(ident)
     now.pop("key", None)
     if not any(x.get("source") == "profile" and x.get("binding") == now for x in auths):
-        return ("the checkout or the origin/push URLs changed since the profile authorized it "
-                "(or the authorization has no recorded binding); authorize it again")
+        return ("the checkout, the origin/push URLs or the git settings that decide where a push goes changed "
+                "since the profile authorized it (or the authorization has no recorded binding); authorize it again")
     if not ident["push_ok"]:
         return "a plain `git push` no longer goes to origin (or origin has no push URL); authorize it again"
     return None
