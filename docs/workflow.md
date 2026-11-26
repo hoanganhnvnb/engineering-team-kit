@@ -26,7 +26,7 @@ and then works through it without checking in.
 
 | Phase | What happens |
 |---|---|
-| intake | Load your profile (and ask what's missing, once), size the task, open the ledger, note the permissions your request already gives |
+| intake | Load your profile (and ask what's missing, once, unless `init` already did), size the task, open the ledger, note the permissions your request already gives |
 | implement | Same as `build` / `fix` / `improve-ui`: a developer agent for anything beyond small |
 | review, test | A fresh reviewer and QA run the review loop until gates G1–G6 pass, or `max_cycles` is reached |
 | release | Commit only this run's files, push the current branch, open a PR or merge, tag |
@@ -46,14 +46,26 @@ keyed by the repo's `origin` URL. That folder is outside every repo, so the prof
 survives plugin updates. It is deleted when you uninstall the plugin, unless you pass
 `--keep-data`.
 
-On the first `team` run in a project, Claude detects what it can: git or SVN, the host
+The recommended way to set it up is `/engineering-team:init`, once at the start of a
+project (see [usage](usage.md#init)). It detects first, asks only what is missing, and
+shows you the saved profile before marking it confirmed. If you skip it, the first
+`team` run asks the same questions midway through the task, and suggests init for next time.
+
+Either way, Claude detects what it can: git or SVN, the host
 and its CLI, the default branch, your commit style and language, commit tooling, and
 deploy candidates. It then asks only the rest, in at most two short rounds of
 questions: branch model, commit and push automatically or ask, PR or direct merge, merge method,
 wait for CI, and deploy targets. If you don't describe a deploy, deploy is skipped.
 
+`init` also asks for a few notes that the profile has no field for (docs language, how
+many subagents at once, words that must never appear in commits). The commit language is a
+profile field, saved from detection. A `team` run reads the notes with `profile show --json`
+and treats them as your preferences, never as permission. They are not enforced:
+`profile show --brief` only counts them.
+
 To change a habit, just say it ("from now on, open a PR instead of merging directly"). The Lead updates
-that field and tells you. To see or reset the profile:
+that field and tells you. To see the profile, run `/engineering-team:init` and choose keep. To change fields or
+reset, choose change or reset there. From a shell:
 
 ```bash
 sh <plugin>/scripts/etk.sh profile show --brief --data ~/.claude/plugins/data/engineering-team-engineering-team-kit
