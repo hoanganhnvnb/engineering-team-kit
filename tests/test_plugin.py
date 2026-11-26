@@ -144,6 +144,35 @@ class PluginStructure(unittest.TestCase):
         for sub in re.findall(r"`profile ([a-z]+)", text):
             self.assertIn(sub, {"detect", "missing", "show", "set", "unset", "remember", "confirm", "path"}, sub)
 
+    def test_team_reads_the_notes_and_init_saves_fields_before_notes(self):
+        team = " ".join((ROOT / "skills" / "team" / "SKILL.md").read_text().split())
+        self.assertIn("If a profile exists", team)
+        self.assertIn('profile show --json --data "${CLAUDE_PLUGIN_DATA}"', team)
+        self.assertIn("A note is not a permission", team)
+        init = " ".join((ROOT / "skills" / "init" / "SKILL.md").read_text().split())
+        self.assertLess(init.index("**Save the fields.**"), init.index("**Project-start notes.**"))
+        self.assertLess(init.index("**Project-start notes.**"), init.index("**Confirm.**"))
+        self.assertIn("even though the user said keep", init)
+        for mapping in ("`default_branch` to `branches.default`", "`cli_authed` to `host.cli_authed`",
+                        "`commit_language` to `commit.language`", "`branches.model` is never detected"):
+            self.assertIn(mapping, init, mapping)
+
+    def test_init_does_not_save_a_guessed_style_or_overwrite_user_values(self):
+        init = " ".join((ROOT / "skills" / "init" / "SKILL.md").read_text().split())
+        self.assertIn("`commit_style` to `commit.style` when it is `conventional` or `commit_tools` is not empty", init)
+        self.assertIn("ask the commit style (Conventional Commits first, `(Recommended)`)", init)
+        self.assertIn("Whether or not `profile missing` lists them, save each mapped, non-null detected fact", init)
+        self.assertIn("or `project` (the tooling defines it) when detect has none", init)
+        self.assertIn("whose profile path is currently unset in `profile show --json", init)
+        self.assertIn("never overwrite a value the user set", init)
+        reset = init[init.index("If the argument is `reset`"):init.index("If a profile exists")]
+        self.assertLess(reset.index("`profile unset`"), reset.index("`profile missing"))
+        self.assertIn("Build and fix don't onboard", " ".join((ROOT / "workflows" / "profile.md").read_text().split()))
+        team = " ".join((ROOT / "skills" / "team" / "SKILL.md").read_text().split())
+        self.assertIn("If a profile exists (the block doesn't say `missing`), run", team)
+        usage = " ".join((ROOT / "docs" / "usage.md").read_text().split())
+        self.assertNotIn("the language for commit messages and docs", usage)
+
     def test_init_save_step_and_reconfirm_branch(self):
         init = " ".join((ROOT / "skills" / "init" / "SKILL.md").read_text().split())
         self.assertIn("for each detected fact that step 3 cleared for saving. On the change path of a complete profile bound to this checkout, write only the chosen field", init)
@@ -198,6 +227,15 @@ class PluginStructure(unittest.TestCase):
         words = {7: "seven", 8: "eight", 9: "nine"}
         text = (ROOT / "docs" / "workflow.md").read_text()
         self.assertIn(f"The {words[len(SKILLS) - 1]} step commands", text)
+
+    def test_profile_question_list_has_one_source_and_init_is_the_entry(self):
+        profile = " ".join((ROOT / "workflows" / "profile.md").read_text().split())
+        self.assertIn("/engineering-team:init", profile)
+        self.assertIn("Run /engineering-team:init next time to set this up in one go.", profile)
+        self.assertIn("/engineering-team:init", (ROOT / "skills" / "team" / "SKILL.md").read_text())
+        for name in SKILLS - {"init"}:
+            text = (ROOT / "skills" / name / "SKILL.md").read_text()
+            self.assertNotIn("release.integrate", text, f"{name} duplicates the profile question list")
 
     def test_parallel_reviewers_get_distinct_id_prefixes(self):
         reviewer = (ROOT / "agents" / "code-reviewer.md").read_text()
