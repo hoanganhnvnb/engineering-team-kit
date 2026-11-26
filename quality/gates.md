@@ -126,6 +126,7 @@ etk.sh run phase release                         # intake|implement|review|test|
 etk.sh run ready                                 # exit 0 only when a release step may run now
 etk.sh run authorize --action merge --source prompt --quote "merge it when green" [--target main] [--condition pass]
 etk.sh run authorize --action push --source profile --data "${CLAUDE_PLUGIN_DATA}"
+etk.sh run preflight --action push|pr --data "${CLAUDE_PLUGIN_DATA}"   # right before git push / gh pr create
 etk.sh run act --action merge --target main --ref abc123 --url <pr> --command "gh pr merge 12" --exit 0
 etk.sh run act --action deploy --target web-eu --production --data "${CLAUDE_PLUGIN_DATA}" --exit 0
 etk.sh run decide --id D1 --level L4 --question "Drop the legacy table?" --options "yes|no" --recommended no \
@@ -136,7 +137,7 @@ etk.sh run decide --id D1 --status approved --answer-quote "no, keep it"   # upd
 Each takes an optional trailing run path. New ledger fields: `phase`, `phase_history`,
 `authorizations` (`action`, `target`, `source`, `quote`, `condition`, `granted_at`),
 `actions` (`action`, `target`, `ref`, `url`, `command`, `exit`, `production`, `at`,
-`gates_ok`), `decisions` (upserted by `id`) and `profile_hash` (sha256 of the profile file a
+`gates_ok`, and for push/pr `binding_ok`), `decisions` (upserted by `id`) and `profile_hash` (sha256 of the profile file a
 `--source profile` authorization was checked against). Actions:
 `commit|push|pr|merge|tag|deploy|rollback`. Sources: `prompt` / `answer` (the user's verbatim
 words in `quote`) or `profile` (the workflow profile; only for commit, push, pr).
@@ -144,7 +145,19 @@ words in `quote`) or `profile` (the workflow profile; only for commit, push, pr)
 must be `auto` (a PR needs `release.integrate: pr` and `release.push: auto`), and the
 profile must be confirmed with no change since (`confirmed_at >= updated_at`). `auto`
 values from a profile set up in another checkout or for another push URL don't count until
-the developer runs `profile confirm` here.
+the developer runs `profile confirm` here. A `--data` that is not a plugin data dir, or is inside the
+repository (git or svn work tree), is refused (exit 2) by `authorize`, `preflight`, `act` and every
+`profile` command whenever it is given, also for an action authorized by the user's own words.
+
+`run preflight --action push|pr --data DIR [RUN]` runs right before `git push` / `gh pr
+create`: it exits 0 only when `ready` holds, a push/pr authorization is recorded, and a
+profile-authorized one still matches the checkout, the origin and push URLs and the git settings
+that decide where a push goes. Otherwise it exits 1 and lists why, before anything is sent.
+`--data` is needed when the profile authorized the step. Nothing enforces or records that it
+ran. `act --action push|pr` repeats the binding check and stores `binding_ok` on the action
+(also with `--force-record`); a push/pr whose authorization comes from the profile needs
+`--data` on `act` (an authorization by the user's own words does not). `check` rejects an
+action with `binding_ok: false`.
 
 `run ready [RUN]` exits 0 only when the release preconditions hold: every gate except G7 is
 PASS or a justified NOT_APPLICABLE, every AC is met, no open or disputed finding of medium

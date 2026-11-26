@@ -55,7 +55,8 @@ Record each phase change with `etk.sh run phase <name> RUN`. `RUN` is the direct
 4. **release**
    - Follow `${CLAUDE_PLUGIN_ROOT}/workflows/ship.md` §0–3: pass check, commit, push,
      PR or merge, tag. Run `etk run preflight --action push|pr --data DATA RUN` immediately
-     before `git push` and before `gh pr create`; push only on exit 0.
+     before `git push` and before `gh pr create`; push only on exit 0. Nothing enforces or
+     records this step: it is on the Lead to run it.
 5. **deploy**
    - Follow `${CLAUDE_PLUGIN_ROOT}/workflows/ship.md` §4. Skip this phase if the
      profile has no deploy target.
