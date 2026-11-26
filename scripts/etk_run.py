@@ -831,16 +831,36 @@ def cmd_authorize(a) -> int:
             refuse(f"the workflow profile doesn't pre-authorize {a.action}: {why}"
                    + (f" ({etk_profile.RECONFIRM})" if stale else ""))
         digest = hashlib.sha256(raw).hexdigest()
+        bound = etk_profile.binding(etk_profile.identify())
+        bound.pop("key", None)
 
     def change(led):
         au = {"action": a.action, "target": a.target or "", "source": a.source, "quote": quote,
               "condition": a.condition or "pass", "granted_at": now_iso()}
         if digest:
             au["profile_hash"] = digest
+            au["binding"] = bound
             led["profile_hash"] = digest
         ledger_list(led, "authorizations").append(au)
         return f"authorized {a.action}{' ' + a.target if a.target else ''} ({a.source}: {quote[:60]!r})"
     return update_ledger(a.path, change)
+
+
+def profile_authorization_moved(led: dict, action: str) -> str | None:
+    """Why a push or PR the workflow profile pre-authorized may not go ahead now: the checkout or
+    any origin or push URL differs from what the profile was confirmed for when it was authorized.
+    A user's own words for the action (prompt, answer) don't depend on the profile."""
+    auths = [x for x in ledger_list(led, "authorizations")
+             if isinstance(x, dict) and x.get("action") == action]
+    if not auths or any(x.get("source") in {"prompt", "answer"} for x in auths):
+        return None
+    now = etk_profile.binding(etk_profile.identify())
+    now.pop("key", None)
+    for x in auths:
+        if x.get("source") == "profile" and x.get("binding") == now:
+            return None
+    return ("the checkout or the origin/push URLs changed since the profile authorized it "
+            "(or the authorization has no recorded binding); authorize it again")
 
 
 def profile_production(raw_data: str, target: str) -> bool | None:
@@ -892,6 +912,10 @@ def cmd_act(a) -> int:
 
     def change(led):
         actions = ledger_list(led, "actions")
+        if a.action in {"push", "pr"}:
+            moved = profile_authorization_moved(led, a.action)
+            if moved and not a.force_record:
+                refuse(f"{a.action} refused: {moved}")
         wrong_kind = kind_blocker(led)
         if a.action in OUTWARD_ACTIONS and wrong_kind and not a.force_record:
             refuse(f"{a.action} refused: {wrong_kind}. Start a ship run for the release")

@@ -831,6 +831,27 @@ class StoreTests(Base):
         self.git(d, "config", "--unset", "url.https://evil.example/.insteadOf")  # the redirect disappears
         self.assertEqual(self.authorize(d, run, "push").returncode, 2)
 
+    def test_act_push_rechecks_the_binding_the_profile_authorized(self):
+        remote = "https://github.com/victim/prod.git"
+        d = self.repo("act", remote)
+        self.ok(d, "set", "release.push", "auto")
+        self.ok(d, "set", "release.commit", "auto")
+        self.ok(d, "confirm")
+        run = self.open_run(d)
+        self.assertEqual(self.authorize(d, run, "push").returncode, 0)
+
+        def act():
+            return subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), "act", "--action", "push",
+                                   "--ref", "x", "--exit", "0", "--force-record" if False else "--target", "origin", run],
+                                  cwd=d, env=self.env, capture_output=True, text=True, timeout=60)
+        self.git(d, "config", "--add", "remote.origin.pushurl", "https://evil.example/x.git")
+        r = act()
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("changed since the profile authorized it", r.stderr)
+        self.assertNotIn("evil", r.stderr + r.stdout)
+        self.git(d, "config", "--unset-all", "remote.origin.pushurl")
+        self.assertNotIn("changed since the profile authorized it", act().stderr)
+
     def test_local_path_origins_and_parsed_remotes_have_different_keys(self):
         local = self.repo("loc", "github.com/o/r")
         plain = self.repo("web", "https://github.com/o/r")
