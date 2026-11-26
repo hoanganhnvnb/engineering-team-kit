@@ -3,6 +3,43 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
+## Unreleased
+
+- Security: a profile remembers where it was confirmed as the checkout path plus hashes of the
+  raw URL lists of `origin`: every fetch URL (`git remote get-url --all origin`) and every push
+  URL (`git remote get-url --push --all origin`), in order, as `git` reports them with
+  `insteadOf` and `pushInsteadOf` applied. git pushes to all push URLs, so adding, removing or
+  reordering one makes the profile stale. It never stores URL text. `auto` settings count only
+  while the path and both hashes still match; nothing is compared after parsing, so no spelling
+  of a URL can pass for another.
+- Security: `release.push: auto` also needs `origin` to have a push URL and a plain `git push`
+  (`remote.pushDefault`, `branch.<name>.pushRemote`, `branch.<name>.remote`) to go to `origin`.
+  Otherwise it is not in effect: `profile show --brief` says so, `authorize --source profile`
+  refuses a push or PR, and the stored answer is kept. A profile saved with no `origin` never
+  authorizes a push or PR. `team` pushes with `git push -u origin <branch>`, the remote the
+  profile binds. `etk run authorize --source profile` records the binding, and `etk run act
+  --action push|pr` refuses when the checkout or any URL changed since, unless the user
+  authorized it in their own words.
+- Security: `profile confirm` in another checkout, or after the push URL changed, no longer
+  approves `release.commit` / `release.push` values that `show --brief` had hidden as `auto`.
+  `profile set` and `unset` there drop those values and bind the profile to the current
+  checkout, so you answer the release fields again, confirm once, and only then does the
+  profile pre-authorize them. `set`, `unset` and `confirm` say which values they dropped, and
+  `remember` no longer binds a profile without dropping them.
+- `profile show --brief` prints no URL and no path for a stale profile, only the reason (push
+  URLs or origin URLs changed, checkout moved).
+- Upgrade note: profiles saved by 0.5.x are found again (the profile key still comes from the
+  origin URL for plainly spelled remotes), but they hold plain-text URLs and no hashes, so
+  they are treated as stale once: answer commit and push again and confirm. Remotes that are
+  not plainly spelled (odd characters, a `%`, a query holding `@`) now get their own profile
+  key from the raw text, so a profile saved for one of those is not found again. A local-path
+  origin has its own `path:` key, so `github.com/o/r` and `https://github.com/o/r` no longer
+  share a profile. The key now comes from the first fetch URL as `git` reports it (with
+  `insteadOf` applied), and a profile saved with no `origin` is not found once one is added. `detect`
+  shows such a remote as `(remote not shown)`.
+- `profile show --brief` now says `(unconfirmed)` whenever the settings changed after the
+  last `profile confirm`, and `profile remember` ignores a note that is already saved.
+
 ## 0.5.2
 
 - **Security (guard):** a check that takes longer than 8 seconds now blocks with a message.

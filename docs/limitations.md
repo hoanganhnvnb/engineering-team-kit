@@ -78,7 +78,7 @@ Honest list. If one of these bites you, an issue is welcome.
   `.git/config`, `.git/hooks/`, `.git/info/`, `~/.gitconfig` or `~/.config/git/`, because those
   decide where the Lead pushes or what git runs for it. The profile is looked up by the
   origin URL; its `auto` settings only count in the checkout and for the push URL it was
-  confirmed with (the URL a plain `git push` on the current branch goes to). A copy of the scripts, or inline code that builds the
+  confirmed with (a hash of the raw list of every push URL and fetch URL of `origin`, in order, never parsed; `release.push: auto` also needs a plain `git push` to go to `origin`). Known limits: `git remote get-url` does not see a push configured outside git (a wrapper or alias), and the check at push time compares what `git` reports then, not what the push command finally does. A copy of the scripts, or inline code that builds the
   path at runtime, gets past that, like any other guard gap. `run check` still requires
   every release action to match a permission that quotes your words, and the Lead,
   not a subagent, runs every outward step.

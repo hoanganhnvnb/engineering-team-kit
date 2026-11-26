@@ -46,8 +46,12 @@ etk run authorize --action deploy --target staging --source prompt \
 - A bare "deploy" means the single non-production target. Production needs the user
   to name it, and its own authorization with `--target <that target>`.
 - If `profile show --brief` says "profile from a different checkout/remote; re-confirm",
-  its `auto` values don't count: show the profile to the user and run `profile confirm`
-  only after they agree, or ask for each step.
+  its `auto` values don't count and `profile confirm` does not bring them back. Show the
+  user why it is stale (the second line of the brief) and every push URL from
+  `git remote get-url --push --all origin`, each cleaned for quoting (drop everything between
+  `://` and the last `@` of the authority, and any `?query` and `#fragment`), have them answer release.commit and release.push
+  again with `profile set`, then run `profile confirm` once after they agree. Or ask for
+  each step.
 - Permission lasts for this run. Never copy it into the profile or a config file.
 - Permission from an earlier conversation must be shown to the user and confirmed
   again before you rely on it.
@@ -69,7 +73,8 @@ etk run authorize --action deploy --target staging --source prompt \
 
 ## 3. Push and integrate
 
-- Push only the current branch to its upstream: `git push -u origin <branch>`. Never
+- Push only the current branch, to `origin`, the remote the profile binds, because the profile
+  hashes every push URL of `origin`: `git push -u origin <branch>`. Never
   `--force`. If the branch has no upstream, or you would push to a protected or
   default branch while the model isn't trunk, ask first (L4).
 - `integrate: pr`:

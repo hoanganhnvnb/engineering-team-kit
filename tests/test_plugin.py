@@ -127,6 +127,17 @@ class PluginStructure(unittest.TestCase):
                 self.assertEqual(fm.get("disable-model-invocation"), "true",
                                  "team workflows are heavy; only the user should start them")
 
+    def test_ship_pushes_to_the_remote_the_profile_binds(self):
+        import sys
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import etk_profile
+        ship = " ".join((ROOT / "workflows" / "ship.md").read_text().split())
+        pushes = re.findall(r"`git push [^`]*?\b(\w+) <branch>`", ship)
+        self.assertEqual(pushes, [etk_profile.BOUND_REMOTE])
+        self.assertIn(f"git remote get-url --push --all {etk_profile.BOUND_REMOTE}", ship)
+        self.assertIn("drop everything between `://` and the last `@` of the authority", ship)
+        self.assertIn("`?query` and `#fragment`", ship)
+
     def test_parallel_reviewers_get_distinct_id_prefixes(self):
         reviewer = (ROOT / "agents" / "code-reviewer.md").read_text()
         briefs = (ROOT / "workflows" / "briefs.md").read_text()
