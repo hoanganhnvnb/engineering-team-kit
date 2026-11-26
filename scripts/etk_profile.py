@@ -322,7 +322,7 @@ def push_remote(root: Path) -> str:
 # helper and proxy settings, `http.*` (proxy, TLS verification, extra headers), `push.*` and
 # submodule recursion. Hashed, never stored or shown.
 PUSH_CONFIG = re.compile(
-    rf"^(remote\.{BOUND_REMOTE}\.(?!(url|pushurl|fetch|push|tagopt|prune|prunetags|promisor|partialclonefilter)$)|"
+    rf"^(remote\.{BOUND_REMOTE}\.(?!(url|pushurl|fetch|push|tagopt|prune|prunetags|promisor|partialclonefilter|gh-resolved)$)|"
     r"http\.|push\.|submodule\.recurse$|submodule\..*\.url$|core\.(sshcommand|gitproxy)$)", re.I)
 
 

@@ -1009,7 +1009,8 @@ class StoreTests(Base):
                      ("core.sshCommand", "ssh -o ProxyCommand=x"), ("http.proxy", "http://p.example:3128"),
                      ("http.https://github.com/.proxy", "http://p.example:3128"), ("http.sslVerify", "false"),
                      ("http.extraHeader", "X: y"), ("push.recurseSubmodules", "on-demand"),
-                     ("submodule.recurse", "true"), ("push.default", "matching"))
+                     ("submodule.recurse", "true"), ("push.default", "matching"),
+                     ("submodule.lib.url", "https://evil.example/x.git"))
 
     def test_settings_that_redirect_a_push_make_the_profile_stale(self):
         remote = "https://github.com/victim/prod.git"
@@ -1039,6 +1040,7 @@ class StoreTests(Base):
         self.git(d, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
         self.git(d, "config", "remote.origin.tagopt", "--no-tags")
         self.git(d, "config", "remote.origin.push", "refs/heads/feat/x")
+        self.git(d, "config", "remote.origin.gh-resolved", "base")
         self.git(d, "config", "user.name", "someone")
         self.git(d, "config", "core.autocrlf", "false")
         self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))

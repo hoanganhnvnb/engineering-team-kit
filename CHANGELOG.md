@@ -29,7 +29,10 @@ All notable changes to this plugin. Versions follow semver; the version in
 - `etk run authorize` records the binding from the stored profile it just checked instead of a
   second look at the repository.
 - The binding's settings hash tells a valueless boolean (`sslVerify`, true) from an empty value
-  (`sslVerify =`, false).
+  (`sslVerify =`, false), and ignores `remote.origin.gh-resolved` (written by
+  `gh repo set-default`), which does not change where a push goes; it does choose the repository
+  `gh pr create` targets, which is not covered (nor is `GH_REPO`). `submodule.*.url` is still hashed: the first
+  `git submodule update --init` or `sync` makes a profile stale once.
 
 ## 0.6.0
 
