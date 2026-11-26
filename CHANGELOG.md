@@ -3,46 +3,6 @@
 All notable changes to this plugin. Versions follow semver; the version in
 `.claude-plugin/plugin.json` is what installed copies pin to.
 
-## Unreleased
-
-- Security: `etk run preflight --action push|pr --data DIR [RUN]` re-checks, right before
-  `git push` and `gh pr create`, that the run is `ready` and that a profile-authorized push or
-  PR still matches what the profile was confirmed for (checkout, origin and push URLs, the git
-  settings that decide where a push goes, and a plain `git push` going to `origin`). It exits 1
-  with the reason and nothing is sent. `workflows/ship.md` and the `team` skill run it before
-  each outward push or PR. The check in `etk run act` is an audit made after the step: it now
-  records `binding_ok` for push and PR, also with `--force-record`, and `etk run check` fails a
-  run whose push or PR was recorded with `binding_ok: false`. A profile-authorized push or PR
-  needs `--data` on `act`.
-- Security: the binding also hashes the git settings that change where a push goes with the URLs
-  unchanged: `remote.origin.*` (receivepack, vcs, proxy, mirror and the like; not the URLs,
-  refspecs, tagopt or prune), `core.sshCommand`, `core.gitProxy`, `http.*`, `push.*`,
-  `submodule.recurse` and `submodule.*.url`. A change makes the profile stale with the reason
-  "git settings that decide where a push goes changed". The guard also stops subagents changing
-  `http.*` and `submodule.*` through `git config`. Remaining limits are in `docs/limitations.md`.
-- Security: the binding hashes are now HMAC-SHA256 under a random per-data-dir key
-  (`binding.key`, mode 0600, created on first use), not a bare sha256 of the URL, so a leaked
-  profile no longer allows offline guessing of a weak URL password. Upgrade effect: every
-  confirmed profile is stale once (its stored hashes use the old scheme and have no settings
-  hash); answer `release.commit` and `release.push` again and run `profile confirm`. Deleting or
-  corrupting the key does the same.
-- `etk run authorize` records the binding from the stored profile it just checked instead of a
-  second look at the repository.
-- Upgrade note: a run that is already open with a profile-authorized push or PR is refused after
-  upgrading, because its stored binding has no `config_hash` and uses unkeyed hashes. Confirm the
-  profile again and run `etk run authorize --source profile` for that run.
-- A `--data` dir inside the repository (git or svn) is now refused (exit 2) by
-  `etk run authorize|preflight|act` as well as by every `profile` command; `discover` reports the
-  profile as unknown. These three also refuse any other invalid `--data` (not a plugin data dir,
-  unsubstituted `${...}`) whenever it is given, also for an action authorized by the user's own words.
-- The binding's settings hash tells a valueless boolean (`sslVerify`, true) from an empty value
-  (`sslVerify =`, false), and ignores `remote.origin.gh-resolved` (written by
-  `gh repo set-default`), which does not change where a push goes; it does choose the repository
-  `gh pr create` targets, which is not covered (nor is `GH_REPO`). `submodule.*.url` is still hashed: the first
-  `git submodule update --init` or `sync` makes a profile stale once.
-- `profile set|unset|confirm|remember` warn on stderr when the binding key cannot be stored (the
-  profile will be stale next time); exit codes are unchanged.
-
 ## 0.6.0
 
 - New `/engineering-team:init`: run it once at the start of a project. It detects the VCS,
@@ -95,6 +55,43 @@ All notable changes to this plugin. Versions follow semver; the version in
   of the question list and now tells the fallback to mention init.
 - Docs: `init` in usage, workflow, README and the Vietnamese README.
 - New eval case `init-asks-only-missing-fields` (written and linted, not run).
+- Security: `etk run preflight --action push|pr --data DIR [RUN]` re-checks, right before
+  `git push` and `gh pr create`, that the run is `ready` and that a profile-authorized push or
+  PR still matches what the profile was confirmed for (checkout, origin and push URLs, the git
+  settings that decide where a push goes, and a plain `git push` going to `origin`). It exits 1
+  with the reason and nothing is sent. `workflows/ship.md` and the `team` skill run it before
+  each outward push or PR. The check in `etk run act` is an audit made after the step: it now
+  records `binding_ok` for push and PR, also with `--force-record`, and `etk run check` fails a
+  run whose push or PR was recorded with `binding_ok: false`. A profile-authorized push or PR
+  needs `--data` on `act`.
+- Security: the binding also hashes the git settings that change where a push goes with the URLs
+  unchanged: `remote.origin.*` (receivepack, vcs, proxy, mirror and the like; not the URLs,
+  refspecs, tagopt or prune), `core.sshCommand`, `core.gitProxy`, `http.*`, `push.*`,
+  `submodule.recurse` and `submodule.*.url`. A change makes the profile stale with the reason
+  "git settings that decide where a push goes changed". The guard also stops subagents changing
+  `http.*` and `submodule.*` through `git config`. Remaining limits are in `docs/limitations.md`.
+- Security: the binding hashes are now HMAC-SHA256 under a random per-data-dir key
+  (`binding.key`, mode 0600, created on first use), not a bare sha256 of the URL, so a leaked
+  profile no longer allows offline guessing of a weak URL password. Upgrade effect: every
+  confirmed profile is stale once (its stored hashes use the old scheme and have no settings
+  hash); answer `release.commit` and `release.push` again and run `profile confirm`. Deleting or
+  corrupting the key does the same.
+- `etk run authorize` records the binding from the stored profile it just checked instead of a
+  second look at the repository.
+- Upgrade note: a run that is already open with a profile-authorized push or PR is refused after
+  upgrading, because its stored binding has no `config_hash` and uses unkeyed hashes. Confirm the
+  profile again and run `etk run authorize --source profile` for that run.
+- A `--data` dir inside the repository (git or svn) is now refused (exit 2) by
+  `etk run authorize|preflight|act` as well as by every `profile` command; `discover` reports the
+  profile as unknown. These three also refuse any other invalid `--data` (not a plugin data dir,
+  unsubstituted `${...}`) whenever it is given, also for an action authorized by the user's own words.
+- The binding's settings hash tells a valueless boolean (`sslVerify`, true) from an empty value
+  (`sslVerify =`, false), and ignores `remote.origin.gh-resolved` (written by
+  `gh repo set-default`), which does not change where a push goes; it does choose the repository
+  `gh pr create` targets, which is not covered (nor is `GH_REPO`). `submodule.*.url` is still hashed: the first
+  `git submodule update --init` or `sync` makes a profile stale once.
+- `profile set|unset|confirm|remember` warn on stderr when the binding key cannot be stored (the
+  profile will be stale next time); exit codes are unchanged.
 
 ## 0.5.2
 
