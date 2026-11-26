@@ -52,6 +52,7 @@ DEPLOY_WORD = re.compile(r"deploy|release|publish|ship", re.I)
 CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069]")
 # What a profile from another checkout or push URL can no longer grant on its own.
 RECONFIRM = "profile from a different checkout/remote; re-confirm"
+PUSH_NA = "release.push auto is not in effect: no `origin` push URL, or a plain `git push` goes to another remote"
 
 ENUMS = {
     "vcs.type": {"git", "svn", "none"},
@@ -262,6 +263,7 @@ def identify(cwd: Path | None = None) -> dict:
     cwd = Path(os.path.realpath(cwd or Path.cwd()))
     top = git(["rev-parse", "--show-toplevel"], cwd)
     origin_all = push_all = None
+    push_ok = False
     if top:
         root = Path(os.path.realpath(top))
         # Everything a push to the bound remote reaches: every fetch URL and every push URL, in
@@ -269,6 +271,8 @@ def identify(cwd: Path | None = None) -> dict:
         origin_all = git(["remote", "get-url", "--all", BOUND_REMOTE], root) or None
         push_all = git(["remote", "get-url", "--push", "--all", BOUND_REMOTE], root) or None
         remote = origin_all.splitlines()[0] if origin_all else git(["config", "--get", f"remote.{BOUND_REMOTE}.url"], root)
+        # `release.push: auto` is only in effect when a plain `git push` goes to the bound remote
+        push_ok = bool(push_all) and push_remote(root) == BOUND_REMOTE
         vcs = "git"
     else:
         root, remote = svn_root(cwd), None
@@ -278,7 +282,7 @@ def identify(cwd: Path | None = None) -> dict:
             remote = run(["svn", "info", "--non-interactive", "--show-item", "repos-root-url"], root) or None
     basis = "remote:" + normalize_remote(remote) if remote else "root:" + str(root)
     return {"vcs": vcs, "root": str(root), "remote": remote, "origin_all": origin_all, "push_all": push_all,
-            "key": hashlib.sha256(basis.encode()).hexdigest()[:16]}
+            "push_ok": push_ok, "key": hashlib.sha256(basis.encode()).hexdigest()[:16]}
 
 
 # ---------------------------------------------------------------- detection
@@ -514,15 +518,26 @@ def checkout_mismatch(prof: dict, ident: dict) -> bool:
             or proj["push_hash"] != now["push_hash"])
 
 
+def push_not_in_effect(prof: dict, ident: dict) -> bool:
+    """`release.push: auto` is stored but can't apply here: there is no `origin` push URL to bind, or
+    a plain `git push` goes to another remote than the one the profile binds."""
+    return get(prof, "release.push") == "auto" and not ident.get("push_ok")
+
+
 def effective(prof: dict, ident: dict) -> dict:
-    """The profile as it may be acted on here: `release.*: auto` counts as unset after a mismatch."""
-    if not checkout_mismatch(prof, ident):
+    """The profile as it may be acted on here: `release.*: auto` counts as unset after a mismatch,
+    and `release.push: auto` counts as `confirm` whenever the push isn't to the bound remote."""
+    mismatch = checkout_mismatch(prof, ident)
+    if not mismatch and not push_not_in_effect(prof, ident):
         return prof
     out = json.loads(json.dumps(prof))
     rel = out.get("release")
     if isinstance(rel, dict):
-        for k in [k for k, v in rel.items() if v == "auto"]:
-            del rel[k]
+        if mismatch:
+            for k in [k for k, v in rel.items() if v == "auto"]:
+                del rel[k]
+        else:
+            rel["push"] = "confirm"
     return out
 
 
@@ -711,7 +726,8 @@ def brief(prof: dict, path: Path, ident: dict | None = None) -> list[str]:
     orig = prof
     confirmed = bool(prof.get("confirmed_at")) and prof.get("confirmed_hash") == settings_hash(prof)
     stale = ident is not None and checkout_mismatch(prof, ident)
-    if stale:
+    push_na = ident is not None and not stale and push_not_in_effect(prof, ident)
+    if stale or push_na:
         prof = effective(prof, ident)
     first = [str(get(prof, "vcs.type") or "vcs ?")]
     host = get(prof, "host.type")
@@ -758,6 +774,10 @@ def brief(prof: dict, path: Path, ident: dict | None = None) -> list[str]:
     if isinstance(mem, list) and mem:
         lines.append(f"memory: {len(mem)} note{'s' if len(mem) != 1 else ''}")
     lines.append(f"file: {path}" + ("" if confirmed else " (unconfirmed)"))
+    if push_na:
+        lines.insert(2, PUSH_NA)
+        if len(lines) > 5:
+            lines = [l for l in lines if not l.startswith(("memory: ", "file: "))]
     if stale:
         lines.insert(0, RECONFIRM)
         where = moved(orig, ident)

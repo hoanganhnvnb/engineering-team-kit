@@ -822,7 +822,11 @@ def cmd_authorize(a) -> int:
         prof, path, raw, stale = load_profile(a.data)
         if raw is None:
             refuse(f"no workflow profile at {path}; --source profile needs one that says auto")
-        why = profile_says_auto(prof, a.action) or profile_unconfirmed(prof)
+        try:  # what was confirmed is the stored file, not the view with hidden `auto` values removed
+            stored = json.loads(raw.decode("utf-8", errors="replace"))
+        except ValueError:
+            stored = {}
+        why = profile_says_auto(prof, a.action) or profile_unconfirmed(stored if isinstance(stored, dict) else {})
         if why:
             refuse(f"the workflow profile doesn't pre-authorize {a.action}: {why}"
                    + (f" ({etk_profile.RECONFIRM})" if stale else ""))

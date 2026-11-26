@@ -734,6 +734,26 @@ class StoreTests(Base):
         self.assertNotIn("push", json.loads(self.ok(c, "show", "--json")).get("release", {}))
         self.assertIn("was not set", self.prof(c, "unset", "release.push").stderr)
 
+    def test_push_auto_needs_a_plain_push_to_the_bound_remote(self):
+        d = self.repo(remote="https://github.com/victim/prod.git")
+        self.ok(d, "set", "release.push", '"auto"')
+        self.ok(d, "confirm")
+        run = self.open_run(d)
+        self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+        self.assertEqual(self.authorize(d, run, "push").returncode, 0)
+        self.git(d, "remote", "add", "decoy", "https://github.com/victim/prod.git")  # same URL, another remote
+        branch = self.git(d, "symbolic-ref", "--short", "HEAD").strip()
+        for key, value in ((f"branch.{branch}.pushRemote", "decoy"), ("remote.pushDefault", "decoy")):
+            self.git(d, "config", key, value)
+            brief = self.ok(d, "show", "--brief")
+            self.assertIn(etk_profile.PUSH_NA, brief.splitlines())
+            self.assertIn("push confirm", brief)
+            self.assertLessEqual(len(brief.splitlines()), 5)
+            self.assertEqual(self.authorize(d, run, "push").returncode, 2)
+            self.assertNotIn("release.push", self.ok(d, "missing"))  # nothing to ask: the stored answer is kept
+            self.git(d, "config", "--unset", key)
+        self.assertEqual(self.authorize(d, run, "push").returncode, 0)  # unchanged config keeps auto
+
     def test_changing_the_set_of_push_or_fetch_urls_makes_the_profile_stale(self):
         remote = "https://github.com/victim/prod.git"
         evil = "https://evil.example/x.git"
@@ -787,6 +807,28 @@ class StoreTests(Base):
         lines = self.ok(d, "show", "--brief").splitlines()
         self.assertEqual(lines[0], etk_profile.RECONFIRM)
         self.assertEqual(lines[1], "origin URLs changed since you confirmed (see `git remote get-url --all origin`)")
+        self.assertEqual(self.authorize(d, run, "push").returncode, 2)
+
+    def test_no_origin_never_satisfies_push_auto_and_a_later_redirect_cannot_either(self):
+        d = self.repo("noremote")
+        self.ok(d, "set", "release.push", "auto")
+        self.ok(d, "set", "release.commit", "auto")
+        self.ok(d, "confirm")
+        run = self.open_run(d)
+        self.assertEqual(self.authorize(d, run, "push").returncode, 2)
+        r = self.authorize(d, run, "commit")  # a local commit needs no remote
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(etk_profile.PUSH_NA, self.ok(d, "show", "--brief"))
+        # (c) a redirect created after the profile was confirmed without an origin
+        self.git(d, "config", "url.https://evil.example/.insteadOf", "origin:")
+        self.git(d, "remote", "add", "origin", "origin:x.git")
+        # an origin changes the profile key (it came from the checkout path before), so the old file isn't found
+        self.assertEqual(self.ok(d, "show", "--brief").strip(), "no workflow profile yet")
+        self.assertEqual(self.authorize(d, run, "push").returncode, 2)
+        self.ok(d, "set", "release.push", "auto")  # the user answers again, here
+        self.ok(d, "confirm")
+        self.assertEqual(self.authorize(d, run, "push").returncode, 0)
+        self.git(d, "config", "--unset", "url.https://evil.example/.insteadOf")  # the redirect disappears
         self.assertEqual(self.authorize(d, run, "push").returncode, 2)
 
     def test_local_path_origins_and_parsed_remotes_have_different_keys(self):

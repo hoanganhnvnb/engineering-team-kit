@@ -34,6 +34,8 @@ class ReleaseLedgerTests(unittest.TestCase):
         self.dir = Path(self.tmp.name)
         git(self.dir, "init", "-q", "-b", "main")
         git(self.dir, "commit", "-q", "--allow-empty", "-m", "init")
+        # a push the profile can pre-authorize needs an `origin` to bind
+        git(self.dir, "remote", "add", "origin", "https://github.com/victim/prod.git")
         datatmp = tempfile.TemporaryDirectory()
         self.addCleanup(datatmp.cleanup)
         self.data = Path(datatmp.name) / "plugins" / "data" / "etk"
@@ -224,7 +226,6 @@ class ReleaseLedgerTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_profile_from_another_checkout_or_push_url_does_not_authorize(self):
-        git(self.dir, "remote", "add", "origin", "https://github.com/victim/prod.git")
         run, _ = self.init("--kind", "ship")
         self.profile("set", "release.push", "auto")
         self.profile("confirm")
