@@ -142,47 +142,61 @@ def data_dir(raw: str | None) -> Path:
 
 # ---------------------------------------------------------------- project identity
 
-def split_url(url: str) -> tuple[str, str, str, str] | None:
-    """(scheme, userinfo, hostport, path) for URL and scp-like forms, None for local paths."""
-    m = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*)://([^/]*)(.*)$", url)
+NOT_SHOWN = "(remote not shown)"
+_HOST = r"(?P<host>\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)"
+_TAIL = r"(?:[?#][^@\s\\]*)?$"
+_URL = re.compile(r"^(?P<scheme>https?|ssh|git|git\+ssh|ssh\+git|svn|svn\+ssh)://"
+                  r"(?:(?P<user>[A-Za-z0-9._~-]+)(?P<pw>:[^@/?#\s\\;%]*)?@)?" + _HOST +
+                  r"(?::(?P<port>\d+))?(?P<path>(?:/[A-Za-z0-9._~+-]*)*)" + _TAIL, re.I)
+_SCP = re.compile(r"^(?:(?P<user>[A-Za-z0-9._-]+)@)?(?P<host>[A-Za-z0-9.-]{2,}):(?!//)(?P<path>[A-Za-z0-9._~+/-]*)" + _TAIL)
+_LOCAL = re.compile(r"^[A-Za-z0-9._~+/ -]+$")
+
+
+def _safe_parts(url: str) -> tuple[str, str, str, str] | None:
+    """(scheme, user, host[:port], path) for a remote that is plainly spelled, else None. Only for
+    keys and display: whether a push is allowed is decided by comparing hashes of the raw URL."""
+    m = _URL.match(url)
     if m:
-        scheme, authority, path = m.group(1).lower(), m.group(2), m.group(3)
-        if scheme == "file":
-            return None
-        user, _, hostport = authority.rpartition("@")
-        return scheme, user, hostport, _no_query(path)
-    m = re.match(r"^(?:([^@/:]+)@)?([^/:]+):(?!//)(.*)$", url)
-    if m and not re.match(r"^[A-Za-z]$", m.group(2)):  # `C:\repo` is a path, not a host
-        return "scp", m.group(1) or "", m.group(2), _no_query(m.group(3))
+        hostport = m.group("host") + (":" + m.group("port") if m.group("port") else "")
+        user = "" if m.group("pw") is not None else (m.group("user") or "")
+        return m.group("scheme").lower(), user, hostport, m.group("path")
+    m = _SCP.match(url)
+    if m:
+        return "scp", m.group("user") or "", m.group("host"), m.group("path")
     return None
 
 
-def _no_query(path: str) -> str:
-    """`/o/r.git?access_token=SECRET#x` -> `/o/r.git`: a query or fragment can carry credentials."""
-    return re.split(r"[?#]", path, maxsplit=1)[0]
+def url_hash(url) -> str | None:
+    """What a profile remembers of a remote: a hash of the raw string, never the string."""
+    if not isinstance(url, str) or not url.strip():
+        return None
+    return hashlib.sha256(url.strip().encode("utf-8", "surrogateescape")).hexdigest()[:24]
 
 
 def redact_remote(url: str | None) -> str | None:
-    """The remote URL with credentials removed (an ssh user like `git@` is kept, passwords never)."""
+    """A remote for display (`detect`): user name only for ssh, no password, query or fragment.
+    Anything not plainly spelled shows as NOT_SHOWN."""
     if not url:
         return None
     url = url.strip()
-    parts = split_url(url)
+    parts = _safe_parts(url)
     if parts is None:
-        return clip(url, 300)
+        return clip(url, 300) if "://" not in url and _LOCAL.match(url) else NOT_SHOWN
     scheme, user, hostport, path = parts
     if scheme == "scp":
         return clip(f"{user + '@' if user else ''}{hostport}:{path}", 300)
-    keep = user if user and ":" not in user and scheme in {"ssh", "git+ssh", "ssh+git"} else ""
+    keep = user if scheme in {"ssh", "git+ssh", "ssh+git", "svn+ssh"} else ""
     return clip(f"{scheme}://{keep + '@' if keep else ''}{hostport}{path}", 300)
 
 
 def normalize_remote(url: str) -> str:
-    """`git@host:o/r.git`, `ssh://git@host:22/o/r`, `https://u:p@HOST/o/r/` -> `host/o/r`."""
+    """The basis of a profile key: `git@host:o/r.git`, `ssh://git@host:22/o/r`, `https://u:p@HOST/o/r/`
+    -> `host/o/r`. A remote that is not plainly spelled gets its own key from its raw text, so two
+    odd URLs never share a profile."""
     url = url.strip()
-    parts = split_url(url)
+    parts = _safe_parts(url)
     if parts is None:
-        return url.rstrip("/")
+        return "path:" + url.rstrip("/") if "://" not in url and _LOCAL.match(url) else "raw:" + url
     _, _, hostport, path = parts
     host = hostport.lower()
     m = re.match(r"^(\[[^\]]+\]|[^:]+)(?::(\d*))?$", host)
@@ -198,7 +212,7 @@ def normalize_remote(url: str) -> str:
 def host_type(remote: str | None) -> str:
     if not remote:
         return "none"
-    parts = split_url(remote)
+    parts = _safe_parts(remote.strip())
     if parts is None:
         return "other"
     host = re.sub(r":\d*$", "", parts[2].lower())
@@ -224,6 +238,9 @@ def svn_root(cwd: Path) -> Path | None:
     return None
 
 
+BOUND_REMOTE = "origin"
+
+
 def push_remote(root: Path) -> str:
     """The remote a plain `git push` on the current branch uses: branch.<b>.pushRemote, then
     remote.pushDefault, then branch.<b>.remote, then origin."""
@@ -244,12 +261,14 @@ def identify(cwd: Path | None = None) -> dict:
     profile; `checkout_mismatch` decides whether that profile's `auto` settings still apply here."""
     cwd = Path(os.path.realpath(cwd or Path.cwd()))
     top = git(["rev-parse", "--show-toplevel"], cwd)
-    push = None
+    origin_all = push_all = None
     if top:
         root = Path(os.path.realpath(top))
-        remote = git(["config", "--get", "remote.origin.url"], root) or None
-        if remote:  # where a plain `git push` really goes: pushurl and pushInsteadOf applied
-            push = git(["remote", "get-url", "--push", push_remote(root)], root) or None
+        # Everything a push to the bound remote reaches: every fetch URL and every push URL, in
+        # order, with insteadOf/pushInsteadOf applied. git pushes to all of the push URLs.
+        origin_all = git(["remote", "get-url", "--all", BOUND_REMOTE], root) or None
+        push_all = git(["remote", "get-url", "--push", "--all", BOUND_REMOTE], root) or None
+        remote = origin_all.splitlines()[0] if origin_all else git(["config", "--get", f"remote.{BOUND_REMOTE}.url"], root)
         vcs = "git"
     else:
         root, remote = svn_root(cwd), None
@@ -258,7 +277,7 @@ def identify(cwd: Path | None = None) -> dict:
         if vcs == "svn" and shutil.which("svn"):
             remote = run(["svn", "info", "--non-interactive", "--show-item", "repos-root-url"], root) or None
     basis = "remote:" + normalize_remote(remote) if remote else "root:" + str(root)
-    return {"vcs": vcs, "root": str(root), "remote": remote, "push": push,
+    return {"vcs": vcs, "root": str(root), "remote": remote, "origin_all": origin_all, "push_all": push_all,
             "key": hashlib.sha256(basis.encode()).hexdigest()[:16]}
 
 
@@ -453,9 +472,9 @@ def save(path: Path, prof: dict, data: Path) -> None:
 
 
 def binding(ident: dict) -> dict:
-    """Where this profile was set up: the checkout and the URL a push really goes to."""
-    return {"remote": redact_remote(ident["remote"]), "push": redact_remote(ident.get("push")),
-            "root": ident["root"], "key": ident["key"]}
+    """Where this profile was set up: the checkout and hashes of the raw origin and push URLs."""
+    return {"root": ident["root"], "origin_hash": url_hash(ident.get("origin_all") or ident.get("remote")),
+            "push_hash": url_hash(ident.get("push_all")), "key": ident["key"]}
 
 
 def stamp(prof: dict, ident: dict, rebind: bool = False) -> dict:
@@ -479,16 +498,20 @@ def settings_hash(prof: dict) -> str:
 
 
 def checkout_mismatch(prof: dict, ident: dict) -> bool:
-    """True when the stored profile was set up in another checkout or for another push URL.
+    """True when the stored profile was set up in another checkout or for other raw origin or push
+    URLs, or has no such record (an older file, or anything unreadable).
 
     The key is derived from `remote.origin.url`, which repository code can rewrite to load
-    someone else's profile, so the root and push URL recorded at confirm time must still match."""
+    someone else's profile, so the root and the raw URL hashes recorded at confirm time must still
+    match. Compared as raw hashes: no parsing, so no spelling of a URL can pass for another."""
     if not prof:
         return False
     proj = prof.get("project")
-    if not isinstance(proj, dict):
+    if not isinstance(proj, dict) or any(k not in proj for k in ("root", "origin_hash", "push_hash")):
         return True
-    return proj.get("root") != ident["root"] or proj.get("push") != redact_remote(ident.get("push"))
+    now = binding(ident)
+    return (proj["root"] != now["root"] or proj["origin_hash"] != now["origin_hash"]
+            or proj["push_hash"] != now["push_hash"])
 
 
 def effective(prof: dict, ident: dict) -> dict:

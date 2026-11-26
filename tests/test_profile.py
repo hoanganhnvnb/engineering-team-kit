@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -111,7 +112,8 @@ class IdentityTests(Base):
     def test_invisible_and_bidi_characters_are_stripped(self):
         evil = "a\u202eb\u200bc\u2066d\x85e\x9bf\u200fg"
         self.assertEqual(etk_profile.clip(evil), "a b c d e f g")
-        self.assertEqual(etk_profile.redact_remote("https://h.com/o/r\u202e.git"), "https://h.com/o/r .git")
+        # a remote that isn't plainly spelled is not shown at all (it used to be shown with the character blanked)
+        self.assertEqual(etk_profile.redact_remote("https://h.com/o/r\u202e.git"), etk_profile.NOT_SHOWN)
 
     def test_hosts(self):
         cases = {"git@gitlab.com:o/r.git": "gitlab", "https://gitlab.acme.io/o/r": "gitlab",
@@ -129,7 +131,9 @@ class IdentityTests(Base):
             self.assertNotIn("s3cr3t", self.ok(d, *args))
         self.ok(d, "set", "commit.style", "conventional")
         stored = json.loads(Path(self.ok(d, "path").strip()).read_text())
-        self.assertEqual(stored["project"]["remote"], "https://github.com/o/r.git")
+        self.assertEqual(self.detect(d)["remote"], "https://github.com/o/r.git")
+        self.assertEqual(stored["project"]["origin_hash"], etk_profile.url_hash("https://alice:s3cr3t@github.com/o/r.git"))
+        self.assertNotIn("remote", stored["project"])  # no URL text in the profile, only hashes
         self.assertNotIn("s3cr3t", json.dumps(stored))
 
     def test_no_remote_keys_on_root(self):
@@ -389,7 +393,8 @@ class StoreTests(Base):
             self.ok(d, "set", path, value)
         self.ok(d, "confirm")
         stored = json.loads(self.ok(d, "show", "--json"))["project"]
-        self.assertEqual((stored["root"], stored["push"]), (str(d), "https://github.com/victim/prod.git"))
+        self.assertEqual((stored["root"], stored["push_hash"]),
+                         (str(d), etk_profile.url_hash("https://github.com/victim/prod.git")))
         self.assertEqual(self.ok(d, "missing"), "")
         self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
         # repository code redirects the push: the stored `auto` values stop counting
@@ -407,25 +412,142 @@ class StoreTests(Base):
         self.ok(d, "confirm")  # the developer looked at it again here
         self.assertEqual(self.ok(d, "missing"), "")
         stored = json.loads(self.ok(d, "show", "--json"))["project"]
-        self.assertEqual(stored["push"], "https://evil.example/x.git")
+        self.assertEqual(stored["push_hash"], etk_profile.url_hash("https://user:pw@evil.example/x.git?token=SECRET"))
         # another checkout that claims the same origin finds the same file but not its `auto`s
         other = self.repo("other", "git@github.com:victim/prod.git")
         self.assertEqual(self.ok(other, "path"), self.ok(d, "path"))
         self.assertEqual(self.ok(other, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
         self.assertIn("release.push", self.ok(other, "missing").splitlines())
 
-    def test_binding_follows_the_remote_a_plain_push_uses(self):
-        d = self.repo(remote="https://github.com/victim/prod.git")
-        self.ok(d, "set", "release.push", '"auto"')
+    ATTACKS = (
+        "https://github.com/o/r.git", "https://evil.example?@github.com/o/r.git", "https://evil.example#@github.com/o/r.git",
+        "https://github.com\\@evil.example/victim/prod.git", "https://evil.example;@github.com/o/r.git",
+        "ssh://github.com%2F@evil.example/o/r.git", "git://github.com%2F@evil.example/o/r.git",
+        "ssh+git://github.com%2F@evil.example/o/r.git", "https://user@evil@github.com/o/r.git",
+        "https://github.com:443@evil.example/o/r.git", "https:////github.com/o/r", "git@github.com:o/r.git",
+        "https://github.com /o/r", "https://" + "a" * 600 + ".com/o/r", "https://alice:pa\\ss@github.com/o/r.git",
+        "https://alice:pa#ss@github.com/o/r.git", "https://github.com/o/r\x00.git",
+    )
+
+    def test_mismatch_is_decided_on_the_raw_push_url(self):
+        for n, bound in enumerate(self.ATTACKS):
+            with self.subTest(bound=bound[:60]):
+                d = self.repo(f"p{n}", "https://github.com/o/r.git")
+                if "\x00" in bound:  # git can't hold a NUL; the hash helper must still not raise on it
+                    self.assertIsNotNone(etk_profile.url_hash(bound))
+                    continue
+                self.git(d, "config", "remote.origin.pushurl", bound)
+                self.ok(d, "set", "release.push", "auto")
+                self.ok(d, "confirm")
+                run = self.open_run(d)
+                self.assertEqual(self.authorize(d, run, "push").returncode, 0)
+                self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+                near = tuple(self.ATTACKS[(n + k) % len(self.ATTACKS)] for k in (1, 2, 3))
+                for other in near + ("https://github.com/o/r.git ", "HTTPS://github.com/o/r.git"):
+                    if other.strip() == bound.strip() or "\x00" in other:
+                        continue
+                    self.git(d, "config", "remote.origin.pushurl", other)
+                    self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM, other[:60])
+                    self.assertEqual(self.authorize(d, run, "push").returncode, 2, other[:60])
+                self.git(d, "config", "remote.origin.pushurl", bound)  # the identical raw string is the same push
+                self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
+                self.assertEqual(self.authorize(d, run, "push").returncode, 0)
+
+    SECRETS = {
+        "https://alice:paXq\\ssZ@github.com/o/r.git": ("paXq", "ssZ"),
+        "https://oauth2:glpat-ABxy\\CDzw@gitlab.com/o/r.git": ("glpat-ABxy", "CDzw"),
+        "https://alice:paXq#ssZ@github.com/o/r.git": ("paXq", "ssZ"), "https://alice:paXq?ssZ@github.com/o/r.git": ("paXq", "ssZ"),
+        "https://alice:paXq/ssZ@github.com/o/r.git": ("paXq", "ssZ"), "https://alice:s3cr3t@github.com/o/r.git": ("s3cr3t",),
+        "https://alice:paXq;ssZ@github.com/o/r.git": ("paXq", "ssZ"), "https://alice:paXq%40ssZ@github.com/o/r.git": ("paXq", "ssZ"),
+        "ssh://git:hunter2@github.com%2F@evil.example/o/r.git": ("hunter2", "evil.example"),
+        "https://github.com/o/r.git?access_token=TOK3N#frag": ("TOK3N",), "git@evil@github.com:o/r.git": ("evil@",),
+    }
+
+    def test_no_url_text_or_secret_reaches_any_output_or_the_saved_file(self):
+        for n, (url, secrets) in enumerate(self.SECRETS.items()):
+            with self.subTest(url=url):
+                d = self.repo(f"s{n}", url)
+                self.git(d, "config", "remote.origin.pushurl", url)
+                outputs = [self.ok(d, "detect"), self.ok(d, "show", "--brief")]
+                outputs += [self.ok(d, "set", "commit.style", "project"), self.ok(d, "set", "release.push", "auto"),
+                            self.ok(d, "show"), self.ok(d, "show", "--json"), self.ok(d, "missing"),
+                            self.ok(d, "confirm"), self.ok(d, "unset", "release.push")]
+                self.git(d, "config", "remote.origin.pushurl", url + "x")  # now stale: brief, set, confirm again
+                outputs += [self.ok(d, "show", "--brief"), self.ok(d, "missing"), self.ok(d, "set", "release.push", "auto"),
+                            self.ok(d, "confirm")]
+                out = DiscoverProfileTests.discover(self, d, "--data", str(self.data))
+                saved = Path(self.ok(d, "path").strip()).read_text()
+                for text in outputs + [out, saved]:
+                    for secret in secrets:
+                        self.assertNotIn(secret, text)
+                self.assertNotIn("alice", saved)
+                self.assertNotIn("://", saved)
+                for text in outputs[1:] + [out]:  # everything but `detect` (which shows a plain host) has no URL
+                    self.assertNotIn("://", text)
+
+    def test_different_origins_never_share_a_profile_path(self):
+        origins = [u for u in self.ATTACKS if "\x00" not in u and not u.startswith("git@")] + [
+            "https://github.com/o/other.git", "ssh://github.com%2F@evil.example/o/r.git",
+            "ssh://github.com%2F@evil.example/o/r2.git", "https://evil.example?@github.com/o/r.git?x"]
+        paths = {}
+        for n, url in enumerate(dict.fromkeys(origins)):
+            d = self.repo(f"o{n}", url)
+            path = self.ok(d, "path").strip()
+            self.assertNotIn(path, paths, f"{url[:50]} shares a profile with {paths.get(path, '')[:50]}")
+            paths[path] = url
+        # the same repository spelled two plain ways still finds one profile
+        a = self.repo("pa", "git@github.com:o/same.git")
+        b = self.repo("pb", "https://user:pw@GitHub.com/o/same.git/")
+        self.assertEqual(self.ok(a, "path"), self.ok(b, "path"))
+
+    def test_garbage_in_the_stored_profile_never_raises(self):
+        d = self.repo(remote="https://github.com/o/r.git")
+        self.ok(d, "set", "release.push", "auto")
         self.ok(d, "confirm")
-        self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
-        self.git(d, "remote", "add", "evil", "https://evil.example/x.git")
-        branch = self.git(d, "symbolic-ref", "--short", "HEAD").strip()
-        self.git(d, "config", f"branch.{branch}.pushRemote", "evil")
-        self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
-        self.git(d, "config", "--unset", f"branch.{branch}.pushRemote")
-        self.git(d, "config", "remote.pushDefault", "evil")
-        self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+        path = Path(self.ok(d, "path").strip())
+        good = json.loads(path.read_text())
+        for bad in (7, [1], {"x": 1}, True, None, "x", 1.5):
+            for field in ("root", "origin_hash", "push_hash", "key", "remote", "push"):
+                prof = json.loads(json.dumps(good))
+                prof["project"][field] = bad
+                path.write_text(json.dumps(prof))
+                for args in (("show", "--brief"), ("missing",), ("show",), ("show", "--json"),
+                             ("set", "release.integrate", '"pr"'), ("unset", "release.integrate"),
+                             ("remember", f"n{field}{bad}"), ("confirm",)):
+                    with self.subTest(field=field, bad=bad, cmd=args[0]):
+                        r = self.prof(d, *args)
+                        self.assertNotIn("Traceback", r.stderr)
+                        self.assertIn(r.returncode, (0, 2), r.stderr)
+                path.write_text(json.dumps(good))
+            for key in ("project", "release", "memory", "deploy", "confirmed_hash"):
+                prof = json.loads(json.dumps(good))
+                prof[key] = bad
+                path.write_text(json.dumps(prof))
+                for args in (("show", "--brief"), ("missing",), ("confirm",), ("set", "commit.style", "project")):
+                    with self.subTest(key=key, bad=bad, cmd=args[0]):
+                        r = self.prof(d, *args)
+                        self.assertNotIn("Traceback", r.stderr)
+                        self.assertIn(r.returncode, (0, 2), r.stderr)
+                        path.write_text(json.dumps(prof))
+                out = DiscoverProfileTests.discover(self, d, "--data", str(self.data))
+                self.assertNotIn("Traceback", out)
+                path.write_text(json.dumps(good))
+
+    def authorize(self, cwd, run, action):
+        return subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), "authorize", "--action", action,
+                               "--source", "profile", "--data", str(self.data), run], cwd=cwd, env=self.env,
+                              capture_output=True, text=True, timeout=60)
+
+    def open_run(self, cwd):
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), "init", "ship it", "--kind", "ship"],
+                           cwd=cwd, env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def test_local_path_origins_and_parsed_remotes_have_different_keys(self):
+        local = self.repo("loc", "github.com/o/r")
+        plain = self.repo("web", "https://github.com/o/r")
+        self.assertNotEqual(self.ok(local, "path"), self.ok(plain, "path"))
 
     def test_symlinks_in_the_store_are_refused(self):
         d = self.repo()
