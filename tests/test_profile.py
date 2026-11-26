@@ -277,7 +277,8 @@ class StoreTests(Base):
         self.ok(d, "set", "team.notes", '{"a": 1}')
         prof = json.loads(path.read_text())
         self.assertEqual(prof["custom"], {"x": [1, 2]})
-        self.assertEqual(prof["release"], {"push": "auto", "extra": True, "integrate": "pr"})
+        # a file with no binding (hand-written, or from before bindings) loses its `auto` values on the first edit
+        self.assertEqual(prof["release"], {"extra": True, "integrate": "pr"})
         self.assertEqual(prof["team"], {"notes": {"a": 1}})
         self.assertEqual(prof["project"]["key"], self.detect(d)["key"])
         self.assertIn("updated_at", prof)
@@ -385,6 +386,28 @@ class StoreTests(Base):
         self.ok(d, "set", "deploy.none", "true")
         self.assertIn("deploy: none", self.ok(d, "show", "--brief"))
 
+    def test_remember_ignores_an_exact_duplicate(self):
+        d = self.repo()
+        self.ok(d, "remember", "run one subagent at a time")
+        out = self.ok(d, "remember", "  run one subagent at a time  ")
+        self.assertIn("already remembered (1 note(s))", out)
+        self.ok(d, "remember", "run one subagent at a time", "--source", "detected")
+        self.ok(d, "remember", "another note")
+        self.assertEqual([m["fact"] for m in json.loads(self.ok(d, "show", "--json"))["memory"]],
+                         ["run one subagent at a time", "another note"])
+
+    def test_brief_says_unconfirmed_after_a_change(self):
+        d = self.repo(remote="git@github.com:o/r.git")
+        self.ok(d, "set", "vcs.type", "git")
+        self.ok(d, "set", "release.commit", "confirm")
+        self.assertTrue(self.ok(d, "show", "--brief").strip().endswith("(unconfirmed)"))
+        self.ok(d, "confirm")
+        self.assertFalse(self.ok(d, "show", "--brief").strip().endswith("(unconfirmed)"))
+        self.ok(d, "remember", "a note changes nothing")
+        self.assertFalse(self.ok(d, "show", "--brief").strip().endswith("(unconfirmed)"))
+        self.ok(d, "set", "release.push", "auto")
+        self.assertTrue(self.ok(d, "show", "--brief").strip().endswith("(unconfirmed)"))
+
     def test_profile_is_bound_to_checkout_and_push_url(self):
         d = self.repo(remote="https://github.com/victim/prod.git")
         for path, value in (("vcs.type", "git"), ("branches.model", "trunk"), ("release.push", "auto"),
@@ -407,9 +430,14 @@ class StoreTests(Base):
                          [etk_profile.RECONFIRM, "release.commit", "release.push"])
         out = DiscoverProfileTests.discover(self, d, "--data", str(self.data))
         self.assertIn("profile from a different checkout/remote; re-confirm", out)
-        self.ok(d, "set", "commit.style", "conventional")  # an edit doesn't re-approve the binding
-        self.assertIn(etk_profile.RECONFIRM, self.ok(d, "missing"))
-        self.ok(d, "confirm")  # the developer looked at it again here
+        self.ok(d, "set", "commit.style", "conventional")  # an edit binds here and drops the old `auto`s
+        self.assertEqual(self.ok(d, "missing").split(), ["release.commit", "release.push"])
+        self.assertNotIn("auto", json.dumps(json.loads(self.ok(d, "show", "--json")).get("release", {})))
+        self.ok(d, "confirm")  # the developer looked at it again here: nothing hidden comes back
+        self.assertEqual(self.ok(d, "missing").split(), ["release.commit", "release.push"])
+        self.ok(d, "set", "release.commit", "auto")
+        self.ok(d, "set", "release.push", "auto")
+        self.ok(d, "confirm")
         self.assertEqual(self.ok(d, "missing"), "")
         stored = json.loads(self.ok(d, "show", "--json"))["project"]
         self.assertEqual(stored["push_hash"], etk_profile.url_hash("https://user:pw@evil.example/x.git?token=SECRET"))
@@ -485,6 +513,20 @@ class StoreTests(Base):
                 for text in outputs[1:] + [out]:  # everything but `detect` (which shows a plain host) has no URL
                     self.assertNotIn("://", text)
 
+    def test_stale_brief_gives_a_reason_without_repository_text(self):
+        d = self.repo(remote="https://github.com/o/r.git")
+        self.ok(d, "set", "release.push", "auto")
+        self.ok(d, "confirm")
+        self.git(d, "config", "remote.origin.pushurl", "https://user:pw@evil.example/x.git?token=SECRET")
+        lines = self.ok(d, "show", "--brief").splitlines()
+        self.assertEqual(lines[0], etk_profile.RECONFIRM)
+        self.assertEqual(lines[1], "push URLs changed since you confirmed (see `git remote get-url --push --all origin`)")
+        self.assertLessEqual(len(lines), 5)
+        self.assertNotIn("evil", "\n".join(lines))
+        other = self.repo("other", "https://github.com/o/r.git")
+        self.assertIn("checkout moved (profile was confirmed at another path)", self.ok(other, "show", "--brief"))
+        self.assertNotIn(str(d), self.ok(other, "show", "--brief"))
+
     def test_different_origins_never_share_a_profile_path(self):
         origins = [u for u in self.ATTACKS if "\x00" not in u and not u.startswith("git@")] + [
             "https://github.com/o/other.git", "ssh://github.com%2F@evil.example/o/r.git",
@@ -533,6 +575,68 @@ class StoreTests(Base):
                 self.assertNotIn("Traceback", out)
                 path.write_text(json.dumps(good))
 
+    def test_old_plaintext_binding_is_stale_and_drops_its_auto_values(self):
+        d = self.repo(remote="https://github.com/o/r.git")
+        path = Path(self.ok(d, "path").strip())
+        path.parent.mkdir(parents=True)
+        old = {"schema": 1, "project": {"remote": "https://github.com/o/r.git", "push": "https://github.com/o/r.git",
+                                        "root": str(d), "key": "x"}, "release": {"push": "auto"}}
+        path.write_text(json.dumps(old))
+        self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+        self.assertIn("older format", self.ok(d, "show", "--brief"))
+        self.assertIn("dropped release.push=auto", self.ok(d, "set", "release.commit", "auto"))
+        stored = json.loads(path.read_text())
+        self.assertEqual(sorted(stored["project"]), ["key", "origin_hash", "push_hash", "root"])
+
+    def test_same_checkout_keeps_auto_values_and_confirmed_state(self):
+        d = self.repo(remote="https://github.com/o/r.git")
+        self.ok(d, "set", "release.push", "auto")
+        self.ok(d, "confirm")
+        before = json.loads(self.ok(d, "show", "--json"))
+        self.assertEqual(self.ok(d, "set", "release.integrate", '"pr"').strip(), "set release.integrate")
+        self.assertEqual(json.loads(self.ok(d, "show", "--json"))["release"]["push"], "auto")
+        self.assertEqual(json.loads(self.ok(d, "show", "--json"))["project"], before["project"])
+        self.ok(d, "confirm")
+        self.assertNotIn("(unconfirmed)", self.ok(d, "show", "--brief"))
+        self.assertEqual(self.authorize(d, self.open_run(d), "push").returncode, 0)
+
+    def test_confirm_in_another_checkout_does_not_approve_hidden_auto_values(self):
+        remote = "https://github.com/victim/prod.git"
+        a = self.repo("a", remote)
+        for path, value in (("vcs.type", "git"), ("release.push", "auto"), ("release.commit", "auto")):
+            self.ok(a, "set", path, value)
+        self.ok(a, "confirm")
+        b = self.repo("b", remote)
+        self.assertEqual(self.ok(b, "path"), self.ok(a, "path"))
+        self.assertEqual(self.ok(b, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+        self.ok(b, "set", "branches.model", "feature")
+        self.ok(b, "confirm")
+        stored = json.loads(self.ok(b, "show", "--json"))
+        self.assertNotIn("push", stored.get("release", {}))
+        self.assertNotIn("commit", stored.get("release", {}))
+        self.assertEqual(stored["project"]["root"], str(b))
+        self.assertEqual(self.ok(b, "missing").split(), ["release.commit", "release.push", "release.integrate",
+                                                         "commit.style", "deploy"])
+        self.assertNotIn("(unconfirmed)", self.ok(b, "show", "--brief"))
+        etk = ROOT / "scripts" / "etk_run.py"
+        r = subprocess.run([sys.executable, str(etk), "init", "ship it", "--kind", "ship"], cwd=b, env=self.env,
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        run = r.stdout.strip()
+        for action in ("push", "commit"):
+            r = subprocess.run([sys.executable, str(etk), "authorize", "--action", action, "--source", "profile",
+                                "--data", str(self.data), run], cwd=b, env=self.env, capture_output=True, text=True,
+                               timeout=60)
+            self.assertEqual(r.returncode, 2, r.stdout)
+            self.assertIn("doesn't pre-authorize", r.stderr)
+        # the developer answers the fields again here, and only then does the profile authorize
+        self.ok(b, "set", "release.push", "auto")
+        self.ok(b, "confirm")
+        r = subprocess.run([sys.executable, str(etk), "authorize", "--action", "push", "--source", "profile",
+                            "--data", str(self.data), run], cwd=b, env=self.env, capture_output=True, text=True,
+                           timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def authorize(self, cwd, run, action):
         return subprocess.run([sys.executable, str(ROOT / "scripts" / "etk_run.py"), "authorize", "--action", action,
                                "--source", "profile", "--data", str(self.data), run], cwd=cwd, env=self.env,
@@ -543,6 +647,147 @@ class StoreTests(Base):
                            cwd=cwd, env=self.env, capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout.strip()
+
+    def test_reanswering_in_another_checkout_needs_one_confirm(self):
+        """The order the init skill uses: missing, set the dropped fields, one confirm."""
+        remote = "https://github.com/victim/prod.git"
+        a = self.repo("a", remote)
+        for path, value in (("vcs.type", "git"), ("branches.model", "trunk"), ("release.commit", "auto"),
+                            ("release.push", "auto"), ("release.integrate", "none"), ("commit.style", "project"),
+                            ("deploy.none", "true")):
+            self.ok(a, "set", path, value)
+        self.ok(a, "confirm")
+        b = self.repo("b", remote)
+        run = self.open_run(b)
+        self.assertEqual(self.authorize(b, run, "push").returncode, 2)
+        self.assertEqual(self.ok(b, "missing").splitlines(), [etk_profile.RECONFIRM, "release.commit", "release.push"])
+        self.ok(b, "set", "release.commit", "auto")
+        self.ok(b, "set", "release.push", "auto")
+        refused = self.authorize(b, run, "push")  # set without confirm never authorizes
+        self.assertEqual(refused.returncode, 2, refused.stdout)
+        self.assertIn("confirm", refused.stderr)
+        self.ok(b, "confirm")
+        self.assertEqual(self.ok(b, "missing"), "")
+        self.assertEqual(self.authorize(b, run, "push").returncode, 0)
+        self.assertEqual(self.authorize(b, run, "commit").returncode, 0)
+
+    def test_a_rewritten_push_url_stays_refused_until_answered_and_confirmed_again(self):
+        d = self.repo(remote="https://github.com/victim/prod.git")
+        for path, value in (("vcs.type", "git"), ("release.commit", "auto"), ("release.push", "auto")):
+            self.ok(d, "set", path, value)
+        self.ok(d, "confirm")
+        run = self.open_run(d)
+        self.assertEqual(self.authorize(d, run, "push").returncode, 0)
+        self.git(d, "config", "remote.origin.pushurl", "https://evil.example/x.git")
+        self.assertEqual(self.authorize(d, run, "commit").returncode, 2)
+        self.ok(d, "confirm")  # looking at it is not answering it
+        self.assertEqual(self.authorize(d, run, "commit").returncode, 2)
+        self.ok(d, "set", "release.commit", "auto")
+        self.assertEqual(self.authorize(d, run, "commit").returncode, 2)  # not confirmed yet
+        self.ok(d, "confirm")
+        self.assertEqual(self.authorize(d, run, "commit").returncode, 0)
+        self.assertEqual(self.authorize(d, run, "push").returncode, 2)  # never re-answered
+
+    def test_set_unset_and_remember_say_what_they_drop_and_never_bind_hidden_autos(self):
+        remote = "https://github.com/victim/prod.git"
+        a = self.repo("a", remote)
+        for path, value in (("release.push", "auto"), ("release.commit", "auto")):
+            self.ok(a, "set", path, value)
+        self.ok(a, "confirm")
+        b = self.repo("b", remote)
+        out = self.ok(b, "set", "branches.model", "feature")
+        self.assertIn("dropped release.push=auto, release.commit=auto", out)
+        self.assertIn("answer them again here", out)
+        self.assertNotIn("dropped", self.ok(b, "set", "release.integrate", "pr"))  # nothing left to drop
+        c = self.repo("c", remote)
+        self.ok(a, "set", "release.push", "auto")
+        self.ok(a, "confirm")
+        self.assertIn("dropped release.push=auto", self.ok(c, "unset", "branches.model"))
+        # an unbound hand-written file: `remember` must not bind it with its `auto` values in place
+        d = self.repo("d", "https://github.com/other/thing.git")
+        path = Path(self.ok(d, "path").strip())
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"schema": 1, "release": {"push": "auto"}}))
+        self.ok(d, "remember", "a note")
+        stored = json.loads(path.read_text())
+        self.assertNotIn("push", stored.get("release", {}))
+        self.assertEqual([m["fact"] for m in stored["memory"]], ["a note"])
+
+    def test_confirm_and_unset_report_what_a_stale_profile_drops(self):
+        remote = "https://github.com/victim/prod.git"
+        a = self.repo("a", remote)
+        self.ok(a, "set", "release.push", "auto")
+        self.ok(a, "confirm")
+        b = self.repo("b", remote)
+        self.assertNotIn("dropped", self.ok(b, "remember", "n"))
+        out = self.ok(b, "confirm")
+        self.assertIn("dropped release.push=auto", out)
+        self.assertNotIn("push", json.loads(self.ok(b, "show", "--json")).get("release", {}))
+        c = self.repo("c", remote)
+        self.ok(b, "set", "release.push", "auto")
+        self.ok(b, "confirm")
+        r = self.prof(c, "unset", "release.push")  # the file still holds the value: it is not "not set"
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("unset release.push", r.stdout)
+        self.assertNotIn("was not set", r.stderr)
+        self.assertNotIn("dropped", r.stdout)
+        self.assertNotIn("push", json.loads(self.ok(c, "show", "--json")).get("release", {}))
+        self.assertIn("was not set", self.prof(c, "unset", "release.push").stderr)
+
+    def test_changing_the_set_of_push_or_fetch_urls_makes_the_profile_stale(self):
+        remote = "https://github.com/victim/prod.git"
+        evil = "https://evil.example/x.git"
+
+        def fresh(name):
+            d = self.repo(name, remote)
+            self.ok(d, "set", "release.push", "auto")
+            self.ok(d, "confirm")
+            run = self.open_run(d)
+            self.assertEqual(self.authorize(d, run, "push").returncode, 0, name)
+            self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"), name)
+            return d, run
+
+        def stale(d, run, reason, what):
+            lines = self.ok(d, "show", "--brief").splitlines()
+            self.assertEqual(lines[0], etk_profile.RECONFIRM, what)
+            self.assertIn(reason, lines[1], what)
+            self.assertEqual(self.authorize(d, run, "push").returncode, 2, what)
+
+        push = "push URLs changed since you confirmed"
+        d, run = fresh("a")  # (a) the original again, then an evil second push URL
+        self.git(d, "config", "--add", "remote.origin.pushurl", remote)  # pushes to the same single URL: no change
+        self.assertEqual(self.authorize(d, run, "push").returncode, 0)
+        self.git(d, "config", "--add", "remote.origin.pushurl", evil)
+        stale(d, run, push, "second pushurl evil")
+        d, run = fresh("b")  # (b) decoy remote, pushDefault decoy, origin.pushurl evil
+        self.git(d, "remote", "add", "decoy", remote)
+        self.git(d, "config", "remote.pushDefault", "decoy")
+        self.git(d, "config", "remote.origin.pushurl", evil)
+        stale(d, run, push, "decoy + evil pushurl")
+        d, run = fresh("d")  # (d) the same URLs in another order
+        self.git(d, "config", "--add", "remote.origin.pushurl", remote)
+        self.git(d, "config", "--add", "remote.origin.pushurl", evil)
+        self.ok(d, "set", "release.push", "auto")
+        self.ok(d, "confirm")
+        self.assertEqual(self.authorize(d, run, "push").returncode, 0)
+        self.git(d, "config", "--unset-all", "remote.origin.pushurl")
+        self.git(d, "config", "--add", "remote.origin.pushurl", evil)
+        self.git(d, "config", "--add", "remote.origin.pushurl", remote)
+        stale(d, run, push, "reordered")
+        d, run = fresh("e")  # (e) another fetch URL
+        self.git(d, "config", "--add", "remote.origin.url", evil)
+        stale(d, run, "origin URLs changed since you confirmed", "second fetch url")
+        d = self.repo("f", remote)  # only the origin (fetch) URL changes, to another spelling of the same repo
+        self.git(d, "config", "remote.origin.pushurl", remote)
+        self.ok(d, "set", "release.push", "auto")
+        self.ok(d, "confirm")
+        run = self.open_run(d)
+        self.assertEqual(self.authorize(d, run, "push").returncode, 0)
+        self.git(d, "config", "remote.origin.url", "git@github.com:victim/prod.git")
+        lines = self.ok(d, "show", "--brief").splitlines()
+        self.assertEqual(lines[0], etk_profile.RECONFIRM)
+        self.assertEqual(lines[1], "origin URLs changed since you confirmed (see `git remote get-url --all origin`)")
+        self.assertEqual(self.authorize(d, run, "push").returncode, 2)
 
     def test_local_path_origins_and_parsed_remotes_have_different_keys(self):
         local = self.repo("loc", "github.com/o/r")

@@ -478,8 +478,8 @@ def binding(ident: dict) -> dict:
 
 
 def stamp(prof: dict, ident: dict, rebind: bool = False) -> dict:
-    """Schema and timestamps. The checkout binding is written on the first save and on `confirm`
-    (rebind) only, so an edit from another checkout doesn't quietly re-approve its `auto` values."""
+    """Schema and timestamps. The checkout binding is written on the first save, on `confirm`
+    (rebind) and by `adopt` (which drops the other checkout's `auto` values first)."""
     prof["schema"] = SCHEMA
     if rebind or not isinstance(prof.get("project"), dict):
         prof["project"] = binding(ident)
@@ -524,6 +524,35 @@ def effective(prof: dict, ident: dict) -> dict:
         for k in [k for k, v in rel.items() if v == "auto"]:
             del rel[k]
     return out
+
+
+def adopt(prof: dict, ident: dict) -> tuple[dict, list[str]]:
+    """The profile an edit applies to, and the `release.*: auto` values it dropped. Another
+    checkout's `auto` values are dropped and the binding moves here, so only what is answered in
+    this checkout survives, and the changed hash still needs a `confirm` before any of it
+    pre-authorizes anything."""
+    if not checkout_mismatch(prof, ident):
+        return prof, []
+    out = effective(prof, ident)
+    out["project"] = binding(ident)
+    rel = prof.get("release") if isinstance(prof.get("release"), dict) else {}
+    return out, [f"release.{k}=auto" for k, v in rel.items() if v == "auto"]
+
+
+def moved(prof: dict, ident: dict) -> str | None:
+    """Why the profile is stale, in words of our own: nothing here comes from the repository."""
+    proj = prof.get("project")
+    if not isinstance(proj, dict) or any(k not in proj for k in ("root", "origin_hash", "push_hash")):
+        return "profile has no usable checkout record (older format); run `git remote get-url --push --all origin`"
+    parts = []
+    now = binding(ident)
+    if proj["push_hash"] != now["push_hash"]:
+        parts.append("push URLs changed since you confirmed (see `git remote get-url --push --all origin`)")
+    if proj["origin_hash"] != now["origin_hash"]:
+        parts.append("origin URLs changed since you confirmed (see `git remote get-url --all origin`)")
+    if proj["root"] != ident["root"]:
+        parts.append("checkout moved (profile was confirmed at another path)")
+    return "; ".join(parts) or None
 
 
 # ---------------------------------------------------------------- dotted paths + validation
@@ -679,6 +708,8 @@ def missing(prof: dict, ident: dict) -> list[str]:
 def brief(prof: dict, path: Path, ident: dict | None = None) -> list[str]:
     if not prof:
         return ["no workflow profile yet"]
+    orig = prof
+    confirmed = bool(prof.get("confirmed_at")) and prof.get("confirmed_hash") == settings_hash(prof)
     stale = ident is not None and checkout_mismatch(prof, ident)
     if stale:
         prof = effective(prof, ident)
@@ -726,11 +757,14 @@ def brief(prof: dict, path: Path, ident: dict | None = None) -> list[str]:
     mem = prof.get("memory")
     if isinstance(mem, list) and mem:
         lines.append(f"memory: {len(mem)} note{'s' if len(mem) != 1 else ''}")
-    lines.append(f"file: {path}" + ("" if prof.get("confirmed_at") else " (unconfirmed)"))
+    lines.append(f"file: {path}" + ("" if confirmed else " (unconfirmed)"))
     if stale:
         lines.insert(0, RECONFIRM)
+        where = moved(orig, ident)
+        if where:
+            lines.insert(1, where)
         if len(lines) > 5:
-            lines = [l for l in lines if not l.startswith("memory: ")]
+            lines = [l for l in lines if not l.startswith(("memory: ", "file: "))]
     return lines[:5]
 
 
@@ -806,6 +840,12 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def report_dropped(dropped: list[str]) -> None:
+    if dropped:
+        print(f"dropped {', '.join(dropped)} (the profile was bound to another checkout or remote); "
+              "answer them again here")
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     try:
@@ -833,32 +873,47 @@ def main(argv: list[str] | None = None) -> int:
             for m in missing(load(path), ident):
                 print(m)
         elif a.cmd == "set":
-            prof = set_value(load(path), a.dotted, parse_value(a.value))
+            base, dropped = adopt(load(path), ident)
+            prof = set_value(base, a.dotted, parse_value(a.value))
             save(path, stamp(prof, ident), data)
             print(f"set {a.dotted}")
+            report_dropped(dropped)
         elif a.cmd == "unset":
-            prof = load(path)
-            if unset_value(prof, a.dotted):
+            prof, dropped = adopt(load(path), ident)
+            changed = unset_value(prof, a.dotted)
+            was_dropped = any(d.split("=")[0] == a.dotted for d in dropped)
+            if changed or dropped:
                 save(path, stamp(prof, ident), data)
+            if changed or was_dropped:
                 print(f"unset {a.dotted}")
             else:
                 print(f"{a.dotted} was not set", file=sys.stderr)
+            report_dropped([d for d in dropped if d.split("=")[0] != a.dotted])
         elif a.cmd == "confirm":
-            prof = stamp(load(path), ident, rebind=True)
+            # What `brief` showed is `effective(...)`: after a checkout change, `auto` values were
+            # hidden, so they must not be rebound and hashed as if the developer had approved them.
+            raw = load(path)
+            prof = stamp(effective(raw, ident) if checkout_mismatch(raw, ident) else raw, ident, rebind=True)
             prof["confirmed_at"] = prof["updated_at"]
             prof["confirmed_hash"] = settings_hash(prof)
             save(path, prof, data)
             print(f"confirmed {path}")
+            if checkout_mismatch(raw, ident):
+                rel = raw.get("release") if isinstance(raw.get("release"), dict) else {}
+                report_dropped([f"release.{k}=auto" for k, v in rel.items() if v == "auto"])
         elif a.cmd == "remember":
             fact = clip(a.fact, MAX_FACT)
             if not fact:
                 raise UsageError("remember needs a non-empty fact")
             prof = load(path)
             mem = prof.get("memory") if isinstance(prof.get("memory"), list) else []
+            if any(isinstance(m, dict) and m.get("fact") == fact for m in mem):
+                print(f"already remembered ({len(mem)} note(s))")
+                return 0
             mem.append({"fact": fact, "source": a.source, "date": dt.date.today().isoformat()})
             prof["memory"] = mem[-MAX_MEMORY:]
             # A note grants nothing, so it keeps `updated_at` and doesn't call for a new confirm.
-            save(path, prof if prof.get("updated_at") else stamp(prof, ident), data)
+            save(path, prof if prof.get("updated_at") else stamp(adopt(prof, ident)[0], ident), data)
             print(f"remembered ({len(prof['memory'])} note(s))")
         return 0
     except UsageError as e:
