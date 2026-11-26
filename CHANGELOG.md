@@ -20,6 +20,12 @@ All notable changes to this plugin. Versions follow semver; the version in
   `submodule.recurse` and `submodule.*.url`. A change makes the profile stale with the reason
   "git settings that decide where a push goes changed". The guard also stops subagents changing
   `http.*` and `submodule.*` through `git config`. Remaining limits are in `docs/limitations.md`.
+- Security: the binding hashes are now HMAC-SHA256 under a random per-data-dir key
+  (`binding.key`, mode 0600, created on first use), not a bare sha256 of the URL, so a leaked
+  profile no longer allows offline guessing of a weak URL password. Upgrade effect: every
+  confirmed profile is stale once (its stored hashes use the old scheme and have no settings
+  hash); answer `release.commit` and `release.push` again and run `profile confirm`. Deleting or
+  corrupting the key does the same.
 - `etk run authorize` records the binding from the stored profile it just checked instead of a
   second look at the repository.
 

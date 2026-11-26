@@ -77,7 +77,7 @@ etk run authorize --action deploy --target staging --source prompt \
 - Immediately before `git push` and before `gh pr create` / `glab mr create`, run
   `etk run preflight --action push|pr --data DATA RUN`. It must exit 0 (it includes `ready`,
   and for a profile-authorized push or PR it re-checks the checkout, the origin and push URLs,
-  and that a plain push goes to `origin`).
+  the git settings that decide where a push goes, and that a plain push goes to `origin`).
   Tests run repo code between authorization and push, so the check at `act` time comes too late
   to stop a push. If it fails, do not push: show the reason, and ask for permission in the user's
   words or have the profile confirmed again.

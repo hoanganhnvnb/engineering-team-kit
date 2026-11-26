@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -77,6 +78,10 @@ class Base(unittest.TestCase):
     def detect(self, cwd: Path) -> dict:
         return json.loads(self.ok(cwd, "detect"))
 
+    def hashed(self, url) -> str | None:
+        """url_hash under this test's data dir key (it exists once the profile was first saved)."""
+        return etk_profile.url_hash(url, etk_profile.binding_key(self.data))
+
 
 class IdentityTests(Base):
     def test_ssh_and_https_clones_share_a_key(self):
@@ -132,7 +137,7 @@ class IdentityTests(Base):
         self.ok(d, "set", "commit.style", "conventional")
         stored = json.loads(Path(self.ok(d, "path").strip()).read_text())
         self.assertEqual(self.detect(d)["remote"], "https://github.com/o/r.git")
-        self.assertEqual(stored["project"]["origin_hash"], etk_profile.url_hash("https://alice:s3cr3t@github.com/o/r.git"))
+        self.assertEqual(stored["project"]["origin_hash"], self.hashed("https://alice:s3cr3t@github.com/o/r.git"))
         self.assertNotIn("remote", stored["project"])  # no URL text in the profile, only hashes
         self.assertNotIn("s3cr3t", json.dumps(stored))
 
@@ -239,6 +244,9 @@ class DetectTests(Base):
         d = self.repo()
         self.detect(d)
         self.assertEqual(list(self.data.iterdir()), [])
+        for args in (("path",), ("show",), ("show", "--brief"), ("missing",)):
+            self.prof(d, *args)
+        self.assertEqual(list(self.data.iterdir()), [])  # reading never creates the binding key
 
 
 class StoreTests(Base):
@@ -452,7 +460,7 @@ class StoreTests(Base):
         self.ok(d, "confirm")
         stored = json.loads(self.ok(d, "show", "--json"))["project"]
         self.assertEqual((stored["root"], stored["push_hash"]),
-                         (str(d), etk_profile.url_hash("https://github.com/victim/prod.git")))
+                         (str(d), self.hashed("https://github.com/victim/prod.git")))
         self.assertEqual(self.ok(d, "missing"), "")
         self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
         # repository code redirects the push: the stored `auto` values stop counting
@@ -475,7 +483,7 @@ class StoreTests(Base):
         self.ok(d, "confirm")
         self.assertEqual(self.ok(d, "missing"), "")
         stored = json.loads(self.ok(d, "show", "--json"))["project"]
-        self.assertEqual(stored["push_hash"], etk_profile.url_hash("https://user:pw@evil.example/x.git?token=SECRET"))
+        self.assertEqual(stored["push_hash"], self.hashed("https://user:pw@evil.example/x.git?token=SECRET"))
         # another checkout that claims the same origin finds the same file but not its `auto`s
         other = self.repo("other", "git@github.com:victim/prod.git")
         self.assertEqual(self.ok(other, "path"), self.ok(d, "path"))
@@ -497,7 +505,7 @@ class StoreTests(Base):
             with self.subTest(bound=bound[:60]):
                 d = self.repo(f"p{n}", "https://github.com/o/r.git")
                 if "\x00" in bound:  # git can't hold a NUL; the hash helper must still not raise on it
-                    self.assertIsNotNone(etk_profile.url_hash(bound))
+                    self.assertIsNotNone(self.hashed(bound))
                     continue
                 self.git(d, "config", "remote.origin.pushurl", bound)
                 self.ok(d, "set", "release.push", "auto")
@@ -1036,6 +1044,79 @@ class StoreTests(Base):
         self.assertNotIn("re-confirm", self.ok(d, "show", "--brief"))
         self.assertEqual(self.authorize(d, self.open_run(d), "push").returncode, 0)
         self.assertEqual(self.preflight(d, run).returncode, 0)
+
+    def key_path(self):
+        return self.data / etk_profile.KEY_FILE
+
+    def test_binding_hashes_are_keyed_per_data_dir(self):
+        remote = "https://alice:s3cr3t@github.com/victim/prod.git"
+        d = self.repo("keyed", remote)
+        self.ok(d, "set", "release.push", "auto")
+        self.ok(d, "confirm")
+        self.assertEqual(stat.S_IMODE(os.stat(self.key_path()).st_mode), 0o600)
+        key = self.key_path().read_text()
+        stored = json.loads(self.ok(d, "show", "--json"))["project"]
+        other = self.tmp / "plugins" / "data" / "other"
+        other.mkdir(parents=True)
+        self.assertNotEqual(stored["origin_hash"], etk_profile.url_hash(remote, etk_profile.binding_key(other, True)))
+        self.assertEqual(stored["origin_hash"], etk_profile.url_hash(remote, etk_profile.binding_key(self.data)))
+        self.assertNotEqual(etk_profile.binding_key(other), etk_profile.binding_key(self.data))
+        self.assertEqual(stat.S_IMODE(os.stat(other / etk_profile.KEY_FILE).st_mode), 0o600)
+        for args in (("show",), ("show", "--json"), ("detect",), ("show", "--brief")):
+            out = self.ok(d, *args)
+            self.assertNotIn(key.strip(), out)
+            self.assertNotIn("s3cr3t", out)
+
+    def test_a_lost_or_unusable_binding_key_makes_the_profile_stale(self):
+        for damage in ("delete", "garbage", "loose", "link"):
+            with self.subTest(damage=damage):
+                d = self.repo(f"lost-{damage}", "https://github.com/victim/prod.git")
+                run = self.ship_ready(d)
+                old = self.key_path().read_text()
+                if damage == "delete":
+                    self.key_path().unlink()
+                elif damage == "garbage":
+                    self.key_path().write_text("not hex")
+                elif damage == "loose":
+                    os.chmod(self.key_path(), 0o644)
+                else:
+                    target = self.tmp / f"elsewhere-{damage}.key"
+                    target.write_text(old)
+                    os.chmod(target, 0o600)
+                    self.key_path().unlink()
+                    self.key_path().symlink_to(target)
+                self.assertEqual(self.ok(d, "show", "--brief").splitlines()[0], etk_profile.RECONFIRM)
+                self.assertEqual(self.authorize(d, self.open_run(d), "push").returncode, 2)
+                self.assertEqual(self.preflight(d, run).returncode, 1)
+                self.assertEqual(self.etk_run(d, "act", "--action", "push", "--exit", "0", "--data", str(self.data),
+                                              run).returncode, 2)
+                # answering again here saves with a new key; only then does `auto` count
+                self.ok(d, "set", "release.push", "auto")
+                self.ok(d, "confirm")
+                key = self.key_path()
+                self.assertFalse(key.is_symlink())
+                self.assertEqual(stat.S_IMODE(os.stat(key).st_mode), 0o600)
+                self.assertNotEqual(key.read_text(), old)
+                self.assertEqual(self.authorize(d, self.open_run(d), "push").returncode, 0)
+
+    def test_concurrent_first_use_ends_with_one_key(self):
+        keys = set()
+        script = ("import sys; sys.path.insert(0, sys.argv[1]); import etk_profile; from pathlib import Path; "
+                  "print(etk_profile.binding_key(Path(sys.argv[2]), True).hex())")
+        procs = [subprocess.Popen([sys.executable, "-c", script, str(ROOT / "scripts"), str(self.data)],
+                                  stdout=subprocess.PIPE, text=True) for _ in range(8)]
+        for p in procs:
+            keys.add(p.communicate(timeout=60)[0].strip())
+        self.assertEqual(len(keys), 1)
+        self.assertEqual(keys.pop(), self.key_path().read_text().strip())
+        self.assertEqual(sorted(x.name for x in self.data.iterdir()), [etk_profile.KEY_FILE])
+
+    def test_an_unwritable_data_dir_gives_a_throwaway_key_that_matches_nothing(self):
+        gone = self.tmp / "plugins" / "data" / "nodir" / "f"
+        (gone.parent).mkdir()
+        (gone.parent / "f").write_text("a file where the dir should be")  # makedirs fails
+        self.assertNotEqual(etk_profile.binding_key(gone / "x", True), etk_profile.binding_key(gone / "x", True))
+        self.assertFalse((gone / "x").exists())
 
     def test_garbage_stored_binding_never_raises(self):
         d = self.repo("garb", "https://github.com/victim/prod.git")

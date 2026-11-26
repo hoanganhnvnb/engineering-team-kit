@@ -866,7 +866,10 @@ def profile_authorization_moved(led: dict, action: str, raw_data: str | None) ->
     if not raw_data:
         return (f"the profile's binding can't be re-checked without --data DIR (the plugin data dir), "
                 f"which a profile-authorized {action} needs")
-    ident = etk_profile.identify()
+    try:
+        ident = etk_profile.identify(None, etk_profile.data_dir(raw_data))
+    except etk_profile.UsageError as e:
+        refuse(f"profile: {e}")
     now = etk_profile.binding(ident)
     now.pop("key", None)
     if not any(x.get("source") == "profile" and x.get("binding") == now for x in auths):
