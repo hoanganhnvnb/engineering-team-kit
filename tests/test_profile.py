@@ -989,6 +989,13 @@ class StoreTests(Base):
         self.assertIs(json.loads((Path(run) / "gates.json").read_text())["actions"][0]["binding_ok"], True)
         self.assertEqual(self.etk_run(d, "check", run).returncode, 0)
 
+    def test_authorize_records_the_hashes_of_the_stored_profile(self):
+        d = self.repo("rec", "https://github.com/victim/prod.git")
+        run = self.ship_ready(d)
+        stored = json.loads(self.ok(d, "show", "--json"))["project"]
+        au = json.loads((Path(run) / "gates.json").read_text())["authorizations"][0]["binding"]
+        self.assertEqual(au, {k: stored[k] for k in etk_profile.BOUND_FIELDS})
+
     def test_local_path_origins_and_parsed_remotes_have_different_keys(self):
         local = self.repo("loc", "github.com/o/r")
         plain = self.repo("web", "https://github.com/o/r")

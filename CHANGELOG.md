@@ -13,6 +13,9 @@ All notable changes to this plugin. Versions follow semver; the version in
   records `binding_ok` for push and PR, also with `--force-record`, and `etk run check` fails a
   run whose push or PR was recorded with `binding_ok: false`. A profile-authorized push or PR
   needs `--data` on `act`.
+- `etk run authorize` records the binding from the stored profile it just checked instead of a
+  second look at the repository.
+
 ## 0.6.0
 
 - New `/engineering-team:init`: run it once at the start of a project. It detects the VCS,

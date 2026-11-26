@@ -838,8 +838,9 @@ def cmd_authorize(a) -> int:
             refuse(f"the workflow profile doesn't pre-authorize {a.action}: {why}"
                    + (f" ({etk_profile.RECONFIRM})" if stale else ""))
         digest = hashlib.sha256(raw).hexdigest()
-        bound = etk_profile.binding(etk_profile.identify())
-        bound.pop("key", None)
+        # the hashes just checked against this checkout (`stale` would have refused above), not a second look
+        proj = stored.get("project") if isinstance(stored, dict) else None
+        bound = {k: proj[k] for k in etk_profile.BOUND_FIELDS}
 
     def change(led):
         au = {"action": a.action, "target": a.target or "", "source": a.source, "quote": quote,

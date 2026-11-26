@@ -240,6 +240,7 @@ def svn_root(cwd: Path) -> Path | None:
 
 
 BOUND_REMOTE = "origin"
+BOUND_FIELDS = ("root", "origin_hash", "push_hash")
 
 
 def push_remote(root: Path) -> str:
@@ -511,11 +512,10 @@ def checkout_mismatch(prof: dict, ident: dict) -> bool:
     if not prof:
         return False
     proj = prof.get("project")
-    if not isinstance(proj, dict) or any(k not in proj for k in ("root", "origin_hash", "push_hash")):
+    if not isinstance(proj, dict) or any(k not in proj for k in BOUND_FIELDS):
         return True
     now = binding(ident)
-    return (proj["root"] != now["root"] or proj["origin_hash"] != now["origin_hash"]
-            or proj["push_hash"] != now["push_hash"])
+    return any(proj[k] != now[k] for k in BOUND_FIELDS)
 
 
 def push_not_in_effect(prof: dict, ident: dict) -> bool:
@@ -557,7 +557,7 @@ def adopt(prof: dict, ident: dict) -> tuple[dict, list[str]]:
 def moved(prof: dict, ident: dict) -> str | None:
     """Why the profile is stale, in words of our own: nothing here comes from the repository."""
     proj = prof.get("project")
-    if not isinstance(proj, dict) or any(k not in proj for k in ("root", "origin_hash", "push_hash")):
+    if not isinstance(proj, dict) or any(k not in proj for k in BOUND_FIELDS):
         return "profile has no usable checkout record (older format); run `git remote get-url --push --all origin`"
     parts = []
     now = binding(ident)
